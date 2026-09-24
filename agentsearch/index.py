@@ -90,6 +90,15 @@ class Index:
                 self.db.execute("DELETE FROM files WHERE path = ?", (path,))
                 stats["files_removed"] += 1
 
+        if stats["files_removed"]:
+            # Safety net for FTS rows left without a covering file_ranges row
+            # (interrupted reindex in older code): their hits would fail context.
+            self.db.execute(
+                "DELETE FROM messages WHERE rowid NOT IN"
+                " (SELECT m.rowid FROM messages m"
+                "  JOIN file_ranges fr ON m.rowid BETWEEN fr.lo AND fr.hi)"
+            )
+
         self.db.execute(
             "INSERT OR REPLACE INTO meta(key, value) VALUES('last_sync', ?)",
             (str(time.time()),),

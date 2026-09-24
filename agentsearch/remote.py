@@ -18,6 +18,14 @@ class RemoteError(Exception):
     pass
 
 
+# Machines provisioned with a stock MIT krb5.conf (missing the Byted realm)
+# keep a user-level override at ~/.krb5.conf; point ssh/GSSAPI at it when the
+# launcher itself was started without KRB5_CONFIG in its environment.
+_USER_KRB5_CONF = os.path.join(os.path.expanduser("~"), ".krb5.conf")
+if os.path.exists(_USER_KRB5_CONF) and not os.environ.get("KRB5_CONFIG"):
+    os.environ["KRB5_CONFIG"] = _USER_KRB5_CONF
+
+
 # --------------------------------------------------------------------- config
 
 def load_remotes():
@@ -138,7 +146,10 @@ def install(remote, logger=lambda m: None, timeout=600):
 # ----------------------------------------------------------------- search io
 
 def search_argv(query, sources, kinds, cwd, since, limit):
-    argv = ["search", query, "--json", "--limit", str(limit)]
+    argv = ["search", query, "--json", "--limit", str(limit), "--host", LOCAL]
+    # --host local pins the remote to its own index. Without it the remote
+    # would fan out to its own registered devices, chaining the federation,
+    # re-tagging other hosts' hits with the remote's name.
     if sources:
         argv += ["--source", ",".join(sources)]
     if kinds is not None:

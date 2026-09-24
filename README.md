@@ -72,6 +72,8 @@ agentsearch remote remove <name>
 
 Requirements on the remote: passwordless SSH, Python 3.7+ with SQLite FTS5. Connections use SSH `ControlMaster` multiplexing via a socket in `~/.agentsearch/`; unreachable devices are skipped with a warning.
 
+Remotes are configured per device, so devices can form a mesh: run `remote add` on each device pointing at the others. A remote always searches only its own index (the forwarded command is pinned to `--host local`), so meshed devices do not chain or duplicate queries. On hosts whose Kerberos config lacks the corporate realm (e.g. a stock MIT `krb5.conf`), a user-level `~/.krb5.conf` plus `KRB5_CONFIG` is enough; agentsearch points its SSH calls at `~/.krb5.conf` automatically when present.
+
 ## Layout
 
 ```

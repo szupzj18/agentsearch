@@ -5,7 +5,7 @@ import time
 from .model import cjk_grams
 from .sources import SOURCES, get_sources
 
-DEFAULT_DB_PATH = os.path.expanduser("~/.agentsearch/index.db")
+DEFAULT_DB_PATH = os.path.expanduser("~/.mnemo/index.db")
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS files (

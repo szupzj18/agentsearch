@@ -73,7 +73,7 @@ def cmd_search(args):
         print(json.dumps(hits, ensure_ascii=False, indent=2))
         return 0
     if not hits:
-        print("no matches (try `agentsearch index` first)")
+        print("no matches (try `mnemo index` first)")
         return 1
     color = sys.stdout.isatty()
     for i, h in enumerate(hits, 1):
@@ -126,7 +126,7 @@ def cmd_session(args):
         print("error: %s" % exc, file=sys.stderr)
         return 1
     if sess is None:
-        print("not in index; run `agentsearch index`", file=sys.stderr)
+        print("not in index; run `mnemo index`", file=sys.stderr)
         return 1
     if host == LOCAL:
         sess["messages"] = _slice(sess["messages"], args.head, args.tail)
@@ -160,7 +160,7 @@ def cmd_context(args):
             print("error: %s" % exc, file=sys.stderr)
             return 1
     if rows is None:
-        print("not in index; run `agentsearch index`", file=sys.stderr)
+        print("not in index; run `mnemo index`", file=sys.stderr)
         return 1
     if args.json:
         print(json.dumps(rows, ensure_ascii=False, indent=2))
@@ -214,7 +214,7 @@ def cmd_status(args):
 
 def cmd_remote_add(args):
     remote = {"name": args.name, "host": args.ssh_host or args.name,
-              "bin": args.bin or "~/agentsearch/bin/agentsearch"}
+              "bin": args.bin or "~/mnemo/bin/mnemo"}
     try:
         if any(r["name"] == remote["name"] for r in remote_mod.load_remotes()):
             raise RemoteError("remote %r already registered; remove it first" % remote["name"])
@@ -233,7 +233,7 @@ def cmd_remote_add(args):
 def cmd_remote_list(args):
     remotes = remote_mod.load_remotes()
     if not remotes:
-        print("no remotes; add one with: agentsearch remote add <name> [ssh-host]")
+        print("no remotes; add one with: mnemo remote add <name> [ssh-host]")
         return 0
     for r in remotes:
         print("%-16s %-32s %s" % (r["name"], r["host"], r["bin"]))
@@ -275,9 +275,9 @@ def cmd_remote_update(args):
 
 def main(argv=None):
     argv = argv if argv is not None else sys.argv[1:]
-    p = argparse.ArgumentParser(prog="agentsearch", description="search across agent sessions on this machine and remote devices")
+    p = argparse.ArgumentParser(prog="mnemo", description="search across agent sessions on this machine and remote devices")
     p.add_argument("--db", default=DEFAULT_DB_PATH, help=argparse.SUPPRESS)
-    p.add_argument("--version", action="version", version="agentsearch " + __version__)
+    p.add_argument("--version", action="version", version="mnemo " + __version__)
     sub = p.add_subparsers(dest="cmd", required=True)
 
     sp = sub.add_parser("index", help="incrementally index local sessions")
@@ -323,10 +323,10 @@ def main(argv=None):
     sp = sub.add_parser("remote", help="manage remote devices")
     rsub = sp.add_subparsers(dest="remote_cmd", required=True)
 
-    rsp = rsub.add_parser("add", help="install agentsearch on a device over SSH and register it")
+    rsp = rsub.add_parser("add", help="install mnemo on a device over SSH and register it")
     rsp.add_argument("name", help="local name for the device, e.g. devbox-109")
     rsp.add_argument("ssh_host", nargs="?", help="SSH host alias (defaults to name)")
-    rsp.add_argument("--bin", help="remote agentsearch launcher path (default: ~/agentsearch/bin/agentsearch)")
+    rsp.add_argument("--bin", help="remote mnemo launcher path (default: ~/mnemo/bin/mnemo)")
     rsp.set_defaults(func=cmd_remote_add)
 
     rsp = rsub.add_parser("list", help="list registered devices")
@@ -341,7 +341,7 @@ def main(argv=None):
     rsp.set_defaults(func=cmd_remote_update)
 
     sp = sub.add_parser("mcp", help="run MCP stdio server")
-    sp.set_defaults(func=lambda a: __import__("agentsearch.mcp_server", fromlist=["run"]).run())
+    sp.set_defaults(func=lambda a: __import__("mnemo.mcp_server", fromlist=["run"]).run())
 
     sp = sub.add_parser("dashboard", help="open the local web admin panel")
     sp.add_argument("--port", type=int, default=7787)

@@ -100,7 +100,7 @@ def diagnose_search(query, hosts, limit):
 
 class Handler(BaseHTTPRequestHandler):
     token = ""
-    server_version = "agentsearch-dashboard"
+    server_version = "mnemo-dashboard"
 
     def log_message(self, fmt, *args):
         return
@@ -187,7 +187,7 @@ class Handler(BaseHTTPRequestHandler):
                 if any(r["name"] == name for r in remote_mod.load_remotes()):
                     raise RemoteError("remote %r already registered" % name)
                 remote = {"name": name, "host": host,
-                          "bin": data.get("bin") or "~/agentsearch/bin/agentsearch"}
+                          "bin": data.get("bin") or "~/mnemo/bin/mnemo"}
                 logs = []
                 remote_mod.install(remote, logger=logs.append)
                 remote_mod.add_remote(name, host, remote["bin"])
@@ -253,7 +253,7 @@ def serve(port=DEFAULT_PORT, open_browser=True):
     url = "http://127.0.0.1:%d/" % port
     if open_browser:
         webbrowser.open(url)
-    print("agentsearch dashboard: %s (Ctrl-C to stop)" % url)
+    print("mnemo dashboard: %s (Ctrl-C to stop)" % url)
     try:
         httpd.serve_forever()
     except KeyboardInterrupt:
@@ -266,7 +266,7 @@ PAGE = r"""<!doctype html>
 <html lang="zh" data-theme="light"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="token" content="__TOKEN__">
-<title>agentsearch 管理面板</title>
+<title>mnemo 管理面板</title>
 <style>
 :root {
   --bg: #eff2f7;
@@ -559,7 +559,7 @@ mark { background:rgba(250,204,21,.38); color:inherit; border-radius:3px; paddin
 <aside class="sidebar">
   <div class="brand"><div class="logo">
     <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
-  </div><span>agentsearch</span></div>
+  </div><span>mnemo</span></div>
   <nav class="nav" id="nav">
     <a data-view="dashboard" class="active">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>仪表盘</span></a>
@@ -694,10 +694,10 @@ const RSTAT = {};  // name -> remote status payload
 /* ---------- theme & nav ---------- */
 function applyTheme(t) {
   document.documentElement.dataset.theme = t;
-  try { localStorage.setItem('agentsearch-theme', t); } catch (e) {}
+  try { localStorage.setItem('mnemo-theme', t); } catch (e) {}
 }
 function toggleTheme() { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); }
-try { const t = localStorage.getItem('agentsearch-theme'); if (t) applyTheme(t); } catch (e) {}
+try { const t = localStorage.getItem('mnemo-theme'); if (t) applyTheme(t); } catch (e) {}
 const TITLES = { dashboard:'仪表盘', devices:'设备管理', search:'会话搜索', logs:'日志查看', session:'会话全文' };
 function go(view) {
   document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));

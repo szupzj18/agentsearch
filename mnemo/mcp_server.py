@@ -171,10 +171,10 @@ def handle_call(name, args, index):
 
 
 def run():
-    sys.stderr.write("agentsearch mcp: indexing sessions...\n")
+    sys.stderr.write("mnemo mcp: indexing sessions...\n")
     index = Index()
     stats = index.sync(logger=lambda m: sys.stderr.write(m + "\n"))
-    sys.stderr.write("agentsearch mcp: ready (%s)\n" % json.dumps(stats))
+    sys.stderr.write("mnemo mcp: ready (%s)\n" % json.dumps(stats))
     tools = build_tools()
 
     for raw in sys.stdin:
@@ -195,7 +195,7 @@ def run():
                 "result": {
                     "protocolVersion": (req.get("params") or {}).get("protocolVersion", "2024-11-05"),
                     "capabilities": {"tools": {}},
-                    "serverInfo": {"name": "agentsearch", "version": __version__},
+                    "serverInfo": {"name": "mnemo", "version": __version__},
                 },
             }
         elif method == "notifications/initialized":

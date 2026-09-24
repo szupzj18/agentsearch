@@ -1,5 +1,5 @@
-// agentsearch — search across claude / codex / pi sessions from inside pi.
-// Thin wrapper over the agentsearch CLI.
+// mnemo — search across claude / codex / pi sessions from inside pi.
+// Thin wrapper over the mnemo CLI.
 // @ts-nocheck
 import { execFile } from "node:child_process";
 import { existsSync } from "node:fs";
@@ -8,10 +8,10 @@ import path from "node:path";
 import { Type } from "typebox";
 
 function resolveBin(): string {
-  const override = process.env.AGENTSEARCH_BIN;
+  const override = process.env.MNEMO_BIN;
   if (override) return override;
-  const defaultBin = path.join(os.homedir(), "agentsearch", "bin", "agentsearch");
-  return existsSync(defaultBin) ? defaultBin : "agentsearch";
+  const defaultBin = path.join(os.homedir(), "mnemo", "bin", "mnemo");
+  return existsSync(defaultBin) ? defaultBin : "mnemo";
 }
 
 const BIN = resolveBin();

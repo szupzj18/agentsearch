@@ -7,7 +7,7 @@ import subprocess
 from .index import Index
 from .search import search as local_search
 
-CONFIG_DIR = os.path.expanduser("~/.agentsearch")
+CONFIG_DIR = os.path.expanduser("~/.mnemo")
 CONFIG_PATH = os.path.join(CONFIG_DIR, "remotes.json")
 LOCAL = "local"
 RRF_K = 60
@@ -37,7 +37,7 @@ def load_remotes():
     out = []
     for r in data.get("remotes", []):
         if r.get("name") and r.get("host"):
-            r.setdefault("bin", "~/agentsearch/bin/agentsearch")
+            r.setdefault("bin", "~/mnemo/bin/mnemo")
             out.append(r)
     return out
 
@@ -50,7 +50,7 @@ def save_remotes(remotes):
     os.replace(tmp, CONFIG_PATH)
 
 
-def add_remote(name, host, bin_path="~/agentsearch/bin/agentsearch"):
+def add_remote(name, host, bin_path="~/mnemo/bin/mnemo"):
     remotes = load_remotes()
     if any(r["name"] == name for r in remotes):
         raise RemoteError("remote %r already registered" % name)
@@ -129,7 +129,7 @@ def install(remote, logger=lambda m: None, timeout=600):
         "--exclude", "index.db",
         "-e", "ssh",
         repo + "/",
-        "%s:~/agentsearch/" % remote["host"],
+        "%s:~/mnemo/" % remote["host"],
     ]
     try:
         p = subprocess.run(rsync, capture_output=True, text=True, timeout=timeout)

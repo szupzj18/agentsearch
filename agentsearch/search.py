@@ -77,6 +77,49 @@ def search(
     return [dict(r) for r in index.db.execute(sql, params).fetchall()]
 
 
+def get_session(index, path):
+    rng = index.db.execute(
+        "SELECT lo, hi FROM file_ranges WHERE path = ?", (path,)
+    ).fetchone()
+    if not rng:
+        return None
+    lo, hi = rng["lo"], rng["hi"]
+
+    meta = index.db.execute(
+        "SELECT source, session_id, cwd FROM files WHERE path = ?", (path,)
+    ).fetchone()
+    span = index.db.execute(
+        "SELECT MIN(ts) AS started_at, MAX(ts) AS ended_at FROM messages"
+        " WHERE rowid BETWEEN ? AND ?",
+        (lo, hi),
+    ).fetchone()
+
+    messages = [
+        {
+            "lineno": r["lineno"],
+            "ts": r["ts"],
+            "role": r["role"],
+            "kind": r["kind"],
+            "text": r["body"],
+        }
+        for r in index.db.execute(
+            "SELECT lineno, ts, role, kind, body FROM messages"
+            " WHERE rowid BETWEEN ? AND ? ORDER BY rowid",
+            (lo, hi),
+        ).fetchall()
+    ]
+    return {
+        "path": path,
+        "source": meta["source"] if meta else None,
+        "session_id": meta["session_id"] if meta else None,
+        "cwd": meta["cwd"] if meta else None,
+        "started_at": span["started_at"],
+        "ended_at": span["ended_at"],
+        "count": len(messages),
+        "messages": messages,
+    }
+
+
 def get_context(index, path, line, before=4, after=8, home=None):
     rng = index.db.execute(
         "SELECT lo, hi FROM file_ranges WHERE path = ?", (path,)

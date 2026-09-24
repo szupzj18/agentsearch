@@ -242,6 +242,15 @@ def fan_out_search(
     return hits, warnings
 
 
+def remote_session(remote, path, head=None, tail=None, timeout=60):
+    argv = ["session", path, "--json"]
+    if head is not None:
+        argv += ["--head", str(head)]
+    if tail is not None:
+        argv += ["--tail", str(tail)]
+    return json.loads(remote_exec(remote, argv, timeout=timeout))
+
+
 def remote_context(remote, path, line, before, after, timeout=30):
     out = remote_exec(
         remote,

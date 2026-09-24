@@ -21,7 +21,7 @@ function run(args: string[], timeoutMs = 30000): Promise<string> {
     execFile(
       BIN,
       args,
-      { timeout: timeoutMs, maxBuffer: 4 * 1024 * 1024 },
+      { timeout: timeoutMs, maxBuffer: 16 * 1024 * 1024 },
       (err, stdout, stderr) => {
         if (err) {
           reject(new Error(stderr?.trim() || err.message));
@@ -42,7 +42,8 @@ export default function (pi) {
       "and registered remote devboxes. " +
       "Finds user prompts, assistant replies, summaries, tool calls and tool results. " +
       "Each hit includes host, source, cwd, timestamp, snippet, and path+line for get_session_context " +
-      "(pass the hit's host there). Supports English (prefix) and Chinese (substring).",
+      "(pass the hit's host there); pass the hit's path alone to get_full_session for the whole session file. " +
+      "Supports English (prefix) and Chinese (substring).",
     parameters: Type.Object({
       query: Type.String({
         description: "keywords separated by whitespace; all must match",
@@ -100,6 +101,31 @@ export default function (pi) {
       ];
       if (params.host) args.push("--host", params.host);
       const text = await run(args);
+      return { content: [{ type: "text", text }], details: {} };
+    },
+  });
+
+  pi.registerTool({
+    name: "get_full_session",
+    label: "Get full session",
+    description:
+      "Fetch every indexed message of the whole session file that a search_sessions hit belongs to, " +
+      "ordered by time. Use when the surrounding window from get_session_context is not enough. " +
+      "head/tail return only the first/last N messages.",
+    parameters: Type.Object({
+      path: Type.String(),
+      host: Type.Optional(
+        Type.String({ description: "device holding the session, from the search result (default: local)" })
+      ),
+      head: Type.Optional(Type.Number({ description: "only the first N messages" })),
+      tail: Type.Optional(Type.Number({ description: "only the last N messages" })),
+    }),
+    async execute(_toolCallId, params) {
+      const args = ["session", params.path, "--json"];
+      if (params.head) args.push("--head", String(params.head));
+      if (params.tail) args.push("--tail", String(params.tail));
+      if (params.host) args.push("--host", params.host);
+      const text = await run(args, 60000);
       return { content: [{ type: "text", text }], details: {} };
     },
   });

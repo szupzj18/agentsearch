@@ -51,6 +51,7 @@ ln -s ~/agentsearch/integrations/pi/agentsearch.ts ~/.pi/agent/extensions/agents
 ```bash
 agentsearch search "关键词" [--source claude,codex,pi] [--cwd SUBSTR] [--since YYYY-MM-DD] [--limit N] [--json]
 agentsearch context <path> <lineno> [--before 4] [--after 8] [--host HOST] [--json]
+agentsearch session <path> [--host HOST] [--head N] [--tail N] [--json]   # whole session file
 agentsearch index            # incremental local reindex
 agentsearch status           # counts and last sync
 agentsearch mcp              # stdio MCP server

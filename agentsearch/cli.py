@@ -7,8 +7,8 @@ import sys
 from . import __version__
 from .index import DEFAULT_DB_PATH, Index
 from . import remote as remote_mod
-from .remote import LOCAL, RemoteError, fan_out_search, remote_context
-from .search import DEFAULT_KINDS, get_context
+from .remote import LOCAL, RemoteError, fan_out_search, remote_context, remote_session
+from .search import DEFAULT_KINDS, get_context, get_session
 from .sources import SOURCES
 
 BOLD = "\033[1m"
@@ -89,6 +89,57 @@ def cmd_search(args):
         )
         print("   " + _hl(h["snippet"], color))
         print("   %s→ %s:%d%s" % (DIM, h["path"], h["lineno"], RESET))
+    return 0
+
+
+def _slice(messages, head, tail):
+    if head:
+        messages = messages[:head]
+    elif tail:
+        messages = messages[-tail:]
+    return messages
+
+
+def _print_messages(path, rows):
+    for r in rows:
+        print("%s%s:%d%s  %s%s/%s%s" % (BOLD, path, r["lineno"], RESET, DIM, r["role"], r["kind"], RESET))
+        text = r["text"]
+        if len(text) > 2000:
+            text = text[:2000] + " …[truncated]"
+        for ln in text.splitlines():
+            print("    " + ln)
+        print()
+
+
+def cmd_session(args):
+    host = args.host or LOCAL
+    try:
+        if host == LOCAL:
+            idx = Index(args.db)
+            sess = get_session(idx, args.path)
+        else:
+            sess = remote_session(
+                remote_mod.get_remote(host), args.path,
+                head=args.head, tail=args.tail,
+            )
+    except RemoteError as exc:
+        print("error: %s" % exc, file=sys.stderr)
+        return 1
+    if sess is None:
+        print("not in index; run `agentsearch index`", file=sys.stderr)
+        return 1
+    if host == LOCAL:
+        sess["messages"] = _slice(sess["messages"], args.head, args.tail)
+    if args.json:
+        print(json.dumps(sess, ensure_ascii=False, indent=2))
+        return 0
+    print("%s%s%s  source=%s  cwd=%s" % (
+        BOLD, args.path, RESET, sess["source"], sess["cwd"]))
+    print("%s%s → %s  %d messages (showing %d)%s\n" % (
+        DIM, (sess["started_at"] or "")[:16].replace("T", " "),
+        (sess["ended_at"] or "")[:16].replace("T", " "),
+        sess["count"], len(sess["messages"]), RESET))
+    _print_messages(args.path, sess["messages"])
     return 0
 
 
@@ -251,6 +302,14 @@ def main(argv=None):
     sp.add_argument("--host", help="device holding the hit (default: local)")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_context)
+
+    sp = sub.add_parser("session", help="dump all indexed messages of one session file")
+    sp.add_argument("path")
+    sp.add_argument("--host", help="device holding the session (default: local)")
+    sp.add_argument("--head", type=int, default=0, help="only first N messages")
+    sp.add_argument("--tail", type=int, default=0, help="only last N messages")
+    sp.add_argument("--json", action="store_true")
+    sp.set_defaults(func=cmd_session)
 
     sp = sub.add_parser("status", help="index stats")
     sp.add_argument("--json", action="store_true")

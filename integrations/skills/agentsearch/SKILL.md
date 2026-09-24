@@ -47,6 +47,14 @@ agentsearch context <path> <lineno> --host <hit-host> --json [--before 4] [--aft
 
 Returns the N indexed messages before/after the hit (normalized role/kind/text) read straight from the index. Read the relevant hits rather than dumping whole sessions into context.
 
+To read the entire session a hit belongs to (the hit's `path` is one JSONL session file), ordered by time:
+
+```bash
+agentsearch session <path> --host <hit-host> --json [--head N] [--tail N]
+```
+
+MCP/Pi expose the same as `get_session` / `get_full_session`. A session can be long; prefer `context` for one detail and use `--head`/`--tail` to skim a long session before pulling all of it. Indexed message bodies are capped at 20k characters each.
+
 ## Keeping the index fresh
 
 The local index updates incrementally on MCP server / Pi tool startup; remote devices sync automatically right before each search (sub-second when idle). If the CLI reports nothing or the user just had a conversation that should be searchable:

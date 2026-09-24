@@ -4,8 +4,8 @@ import sys
 from . import __version__
 from .index import Index
 from . import remote as remote_mod
-from .remote import LOCAL, fan_out_search, remote_context
-from .search import DEFAULT_KINDS, get_context
+from .remote import LOCAL, fan_out_search, remote_context, remote_session
+from .search import DEFAULT_KINDS, get_context, get_session
 
 
 def build_tools():
@@ -18,7 +18,7 @@ def build_tools():
                 "Full-text search across coding-agent sessions (claude, codex, pi) on this machine"
                 " and registered remote devices. Matches user prompts, assistant replies, summaries,"
                 " tool calls and tool results. Each hit gives host, source, cwd, timestamp, a snippet,"
-                " and file:line for get_context (pass the hit's host to get_context)."
+                " and file:line for get_context (pass the hit's host to get_context); pass the hit's path alone to get_session for the whole session file."
                 " Supports English (prefix) and Chinese (substring via bigrams)."
             ),
             "inputSchema": {
@@ -53,6 +53,25 @@ def build_tools():
                     "after": {"type": "integer", "description": "messages after the hit (default 8)"},
                 },
                 "required": ["path", "line"],
+            },
+        },
+        {
+            "name": "get_session",
+            "description": (
+                "Fetch every indexed message of the whole session file that a search hit belongs to"
+                " (same normalized format), ordered by time. Use after get_context when you need the"
+                " full conversation rather than a window around one line. Each message body is capped"
+                " at 20k characters in the index. head/tail select only the first/last N messages."
+            ),
+            "inputSchema": {
+                "type": "object",
+                "properties": {
+                    "path": {"type": "string"},
+                    "host": {"type": "string", "description": "device holding the session, from the search result (default: local)"},
+                    "head": {"type": "integer", "description": "only return the first N messages"},
+                    "tail": {"type": "integer", "description": "only return the last N messages"},
+                },
+                "required": ["path"],
             },
         },
         {
@@ -127,6 +146,22 @@ def handle_call(name, args, index):
         if rows is None:
             raise ValueError("path not in index; run reindex")
         return _text_result(rows)
+    if name == "get_session":
+        host = args.get("host") or LOCAL
+        head = args.get("head")
+        tail = args.get("tail")
+        if host == LOCAL:
+            sess = get_session(index, args["path"])
+        else:
+            sess = remote_session(
+                remote_mod.get_remote(host), args["path"],
+                head=head, tail=tail,
+            )
+        if sess is None:
+            raise ValueError("path not in index; run reindex")
+        if host == LOCAL and (head or tail):
+            sess["messages"] = sess["messages"][:head] if head else sess["messages"][-tail:]
+        return _text_result(sess)
     if name == "reindex":
         sources = args.get("source")
         stats = index.sync(sources.split(",") if sources else None)

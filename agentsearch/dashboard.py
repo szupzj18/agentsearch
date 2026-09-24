@@ -9,7 +9,7 @@ from urllib.parse import urlparse, parse_qs
 from . import remote as remote_mod
 from .index import DEFAULT_DB_PATH, Index
 from .remote import LOCAL, RemoteError
-from .search import DEFAULT_KINDS
+from .search import DEFAULT_KINDS, get_session, raw_session
 from .sources import SOURCES
 
 DEFAULT_PORT = 7787
@@ -36,6 +36,14 @@ def local_sync():
     idx = Index(DEFAULT_DB_PATH)
     try:
         return idx.sync()
+    finally:
+        idx.close()
+
+
+def local_session(path, raw=False):
+    idx = Index(DEFAULT_DB_PATH)
+    try:
+        return raw_session(idx, path) if raw else get_session(idx, path)
     finally:
         idx.close()
 
@@ -201,6 +209,29 @@ class Handler(BaseHTTPRequestHandler):
                     raise RemoteError("query is required")
                 limit = min(int(data.get("limit", 20)), 50)
                 self._json(diagnose_search(query, data.get("hosts"), limit))
+            elif path == "/api/session":
+                path_value = (data.get("path") or "").strip()
+                if not path_value:
+                    raise RemoteError("path is required")
+                host = data.get("host") or LOCAL
+                raw = bool(data.get("raw"))
+                head, tail = data.get("head"), data.get("tail")
+                if host == LOCAL:
+                    value = local_session(path_value, raw)
+                    if value and (head or tail):
+                        if head:
+                            value["messages"] = value["messages"][: int(head)]
+                        else:
+                            value["messages"] = value["messages"][-int(tail):]
+                else:
+                    value = remote_mod.remote_session(
+                        remote_mod.get_remote(host), path_value,
+                        head=head, tail=tail, raw=raw, timeout=180,
+                    )
+                if value is None:
+                    self._json({"ok": False, "error": "path not in index; sync first"}, 404)
+                else:
+                    self._json({"ok": True, "session": value})
             else:
                 self._json({"error": "not found"}, 404)
         except (RemoteError, ValueError, KeyError) as exc:
@@ -376,6 +407,73 @@ tbody tr:hover { background:var(--surface-soft); }
 .view.active { display:block; }
 @keyframes fade { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
 
+/* search hit list */
+.hitlist { display:flex; flex-direction:column; gap:9px; }
+.hit { display:grid; grid-template-columns:28px 36px 1fr 18px; gap:12px; align-items:start;
+  padding:13px 16px; background:var(--surface-2); border:1px solid var(--border); border-radius:12px;
+  cursor:pointer; transition:border-color .15s, box-shadow .15s, transform .15s; }
+.hit:hover { border-color:var(--accent-border); box-shadow:0 6px 18px rgba(31,38,135,.1); transform:translateY(-1px); }
+.hit-rank { color:var(--text-3); font-size:12px; padding-top:8px; text-align:center; font-variant-numeric:tabular-nums; }
+.hit-ico { width:36px; height:36px; border-radius:10px; display:grid; place-items:center; color:#fff; flex:none; }
+.hit-ico.claude { background:linear-gradient(135deg,#e0865c,#d97757); }
+.hit-ico.codex { background:linear-gradient(135deg,#3f3f46,#18181b); }
+.hit-ico.pi { background:linear-gradient(135deg,#a78bfa,#7c3aed); }
+.hit-ico svg { width:17px; height:17px; }
+.hit-main { min-width:0; }
+.hit-meta { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--text-2); margin-bottom:4px; }
+.hit-snip { color:var(--text-2); font-size:13px; line-height:1.6; display:-webkit-box; -webkit-line-clamp:2;
+  -webkit-box-orient:vertical; overflow:hidden; word-break:break-word; }
+.hit-path { color:var(--text-3); font-size:11.5px; margin-top:6px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.hit-go { color:var(--text-3); padding-top:8px; transition:color .15s, transform .15s; }
+.hit:hover .hit-go { color:var(--accent); transform:translateX(2px); }
+.srcbadge { font-size:11px; font-weight:700; padding:1.5px 8px; border-radius:6px;
+  background:var(--surface-soft); color:var(--text-2); border:1px solid var(--border); }
+mark { background:rgba(250,204,21,.38); color:inherit; border-radius:3px; padding:0 1px; }
+[data-theme="dark"] mark { background:rgba(250,204,21,.28); }
+
+/* session transcript */
+.sess-bar { position:sticky; top:-18px; z-index:15; margin:-18px -28px 20px; padding:12px 28px;
+  background:var(--surface); backdrop-filter:blur(18px); -webkit-backdrop-filter:blur(18px);
+  border-bottom:1px solid var(--border); display:flex; gap:10px; align-items:center; flex-wrap:wrap; }
+.sess-bar .st { min-width:0; }
+.sess-bar .st .t1 { font-weight:650; font-size:13.5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:380px; }
+.sess-bar .st .t2 { font-size:11.5px; color:var(--text-3); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; max-width:460px; }
+.sess-bar .mini { min-width:48px; text-align:center; font-size:11.5px; padding:6px 9px; }
+#sessMeta { font-size:12px; color:var(--text-2); display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+.trans { max-width:920px; margin:0 auto; display:flex; flex-direction:column; gap:16px; padding-bottom:60px; }
+.loadbar { display:flex; justify-content:center; }
+.msg { display:grid; grid-template-columns:32px 1fr; gap:13px; animation:fade .2s ease; }
+.msg-av { width:32px; height:32px; border-radius:9px; display:grid; place-items:center; color:#fff; flex:none; }
+.msg-av svg { width:16px; height:16px; }
+.msg-av.user { background:linear-gradient(135deg,#3b82f6,#22d3ee); }
+.msg-av.assistant { background:linear-gradient(135deg,#a78bfa,#ec4899); }
+.msg-av.tool { background:#94a3b8; }
+.msg-main { min-width:0; border:1px solid var(--border); border-radius:0 12px 12px 12px;
+  background:var(--surface-2); padding:11px 15px 12px; transition:border-color .2s, box-shadow .2s; }
+.msg.hit > .msg-av { box-shadow:0 0 0 3px var(--accent-soft); }
+.msg.hit .msg-main { border-color:var(--accent-border); box-shadow:0 0 0 3px var(--accent-soft); }
+.msg-h { display:flex; align-items:center; gap:8px; flex-wrap:wrap; font-size:12px; color:var(--text-3); margin-bottom:5px; }
+.msg-h .who { color:var(--text); font-weight:650; }
+.msg-h .ln { font-size:11px; }
+.kbadge { font-size:10.5px; font-weight:600; padding:1px 7px; border-radius:999px;
+  background:var(--surface-soft); color:var(--text-2); border:1px solid var(--border); }
+.kbadge.k-tool_call, .kbadge.k-tool_result { color:#0891b2; background:rgba(34,211,238,.12); border-color:transparent; }
+[data-theme="dark"] .kbadge.k-tool_call, [data-theme="dark"] .kbadge.k-tool_result { color:#67e8f9; }
+.kbadge.k-summary { color:#7c3aed; background:rgba(139,92,246,.12); border-color:transparent; }
+[data-theme="dark"] .kbadge.k-summary { color:#c4b5fd; }
+.kbadge.k-reasoning { color:var(--text-3); }
+.msg.kind-tool_call .mbody, .msg.kind-tool_result .mbody { color:var(--text-2); font-size:12.5px; }
+.mbody { white-space:pre-wrap; word-break:break-word; font-size:13px; line-height:1.68; }
+.mbody code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px;
+  background:var(--surface-soft); border:1px solid var(--border); border-radius:4px; padding:0 4px; }
+.codeblock { background:var(--surface-soft); border:1px solid var(--border); border-radius:8px;
+  padding:10px 13px; margin:6px 0; overflow:auto; font-family:ui-monospace,SFMono-Regular,Menlo,monospace;
+  font-size:12px; line-height:1.55; white-space:pre; }
+.mbody.clamp { max-height:300px; overflow:hidden; position:relative; }
+.mbody.clamp::after { content:""; position:absolute; inset:auto 0 0 0; height:76px;
+  background:linear-gradient(transparent, var(--surface-2)); pointer-events:none; }
+.mexpand { margin-top:7px; font-size:11.5px; padding:3px 10px; }
+
 /* toasts */
 #toasts { position:fixed; top:18px; right:22px; z-index:60; display:flex; flex-direction:column; gap:9px; width:340px; }
 .toast { display:flex; gap:10px; align-items:flex-start; background:var(--surface-2); border:1px solid var(--border);
@@ -421,7 +519,7 @@ tbody tr:hover { background:var(--surface-soft); }
     <a data-view="devices">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span>设备管理</span></a>
     <a data-view="search">
-      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>搜索诊断</span></a>
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>会话搜索</span></a>
     <a data-view="logs">
       <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h16M4 15h10M4 20h7"/></svg><span>日志查看</span></a>
   </nav>
@@ -489,20 +587,40 @@ tbody tr:hover { background:var(--surface-soft); }
   <!-- search -->
   <section class="view" id="view-search">
     <div class="card">
-      <h2>搜索诊断</h2>
+      <h2>会话搜索</h2>
       <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
         <input type="text" id="q" placeholder="查询词，如：实验 重开" style="min-width:260px; flex:1">
         <input type="number" id="lim" value="20" min="1" max="50" style="width:74px" title="每设备取数">
         <label class="chk"><input type="checkbox" id="allHosts" checked onchange="renderHostPickers()"> 全部设备</label>
         <span id="hostPickers" style="display:flex;gap:12px"></span>
-        <button class="primary" onclick="runSearch()">查询</button>
+        <button class="primary" onclick="runSearch(this)">查询</button>
       </div>
       <div id="chips" style="margin-top:14px"></div>
     </div>
     <div class="card">
-      <h2>合并结果（RRF）</h2>
-      <div id="searchOut"><div class="empty">输入查询词后，这里展示每台设备的耗时、命中数和合并排名。</div></div>
+      <h2>搜索结果 <span class="spacer"></span><span id="hitCount" style="font-weight:400;font-size:12px"></span></h2>
+      <div id="searchOut"><div class="empty">输入查询词并查询；结果支持点击，可直接打开该条会话的完整全文。</div></div>
     </div>
+  </section>
+
+  <!-- session transcript -->
+  <section class="view" id="view-session">
+    <div class="sess-bar">
+      <button class="iconbtn" onclick="closeSession()" title="返回搜索结果">
+        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m15 18-6-6 6-6"/></svg>
+        返回</button>
+      <div class="st">
+        <div class="t1 mono" id="sessTitle">—</div>
+        <div class="t2 mono" id="sessSub"></div>
+      </div>
+      <span style="flex:1"></span>
+      <span id="sessMeta"></span>
+      <button class="mini" id="sessPrev" onclick="gotoMatch(-1)" title="上一处匹配">↑</button>
+      <button class="mini" id="sessNext" onclick="gotoMatch(1)" title="下一处匹配">↓</button>
+      <button id="sessRaw" onclick="toggleRaw()">读取全文</button>
+      <button onclick="copySessionPath()">复制路径</button>
+    </div>
+    <div id="sessBody"><div class="empty">从搜索结果点击一条记录打开会话。</div></div>
   </section>
 
   <!-- logs -->
@@ -533,15 +651,16 @@ function applyTheme(t) {
 }
 function toggleTheme() { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); }
 try { const t = localStorage.getItem('agentsearch-theme'); if (t) applyTheme(t); } catch (e) {}
-const TITLES = { dashboard:'仪表盘', devices:'设备管理', search:'搜索诊断', logs:'日志查看' };
+const TITLES = { dashboard:'仪表盘', devices:'设备管理', search:'会话搜索', logs:'日志查看', session:'会话全文' };
 function go(view) {
   document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
   document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
-  document.getElementById('pageTitle').textContent = TITLES[view];
+  document.getElementById('pageTitle').textContent = TITLES[view] || '';
   history.replaceState(null, '', '#' + view);
 }
 document.querySelectorAll('.nav a').forEach(a => a.onclick = () => go(a.dataset.view));
 if (location.hash === '#devices' || location.hash === '#search' || location.hash === '#logs') go(location.hash.slice(1));
+else if (location.hash.startsWith('#session')) openSessionFromHash();
 
 /* ---------- primitives ---------- */
 function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
@@ -749,37 +868,250 @@ function pickedHosts() {
   if (document.getElementById('allHosts').checked) return null;
   return [...document.querySelectorAll('.hpick:checked')].map(e => e.value);
 }
-async function runSearch() {
+const ROLE_LABEL = { user:'用户', assistant:'助手', tool:'工具', system:'系统' };
+const KIND_LABEL = { text:'对话', summary:'摘要', tool_call:'工具调用', tool_result:'工具结果', reasoning:'思考' };
+let LAST_TERMS = [];
+let LAST_HITS = [];
+
+async function runSearch(btn) {
   const query = document.getElementById('q').value.trim();
   if (!query) return;
   const limit = parseInt(document.getElementById('lim').value, 10) || 20;
-  const btn = event.target; busy(btn);
+  if (btn) busy(btn);
   const r = await api('/api/search', { query, limit, hosts: pickedHosts() });
-  idle(btn);
+  if (btn) idle(btn);
   if (r.error) { toast(r.error, 'err'); return; }
   document.getElementById('chips').innerHTML = r.per_host.map(h =>
     '<span class="pill ' + (h.ok ? 'ok' : 'bad') + '" style="margin:2px 6px 2px 0">' +
     esc(h.host) + ' · ' + (h.ok ? h.ms + ' ms · ' + h.hits + ' 命中' : '不可达') + '</span>').join('') +
     (r.warnings.length ? '<div class="muted" style="margin-top:6px; font-size:12px">' + r.warnings.map(esc).join('<br>') + '</div>' : '');
+  LAST_TERMS = query.split(/\s+/).filter(Boolean);
+  LAST_HITS = r.merged;
+  document.getElementById('hitCount').textContent = r.merged.length ? r.merged.length + ' 条 · 点击查看会话全文' : '';
   if (!r.merged.length) { document.getElementById('searchOut').innerHTML = '<div class="empty">没有匹配结果。</div>'; return; }
   document.getElementById('searchOut').innerHTML =
-    '<div style="overflow:auto"><table><thead><tr><th>#</th><th>设备</th><th>来源</th><th>时间</th><th>摘要</th><th>位置</th></tr></thead><tbody>' +
-    r.merged.map((h, i) => '<tr><td class="muted">' + (i+1) + '</td>' +
-      '<td><span class="hosttag ' + (h.host === 'local' ? 'local' : '') + '">' + esc(h.host) + '</span></td>' +
-      '<td>' + esc(h.source) + '</td><td class="muted nowrap">' + esc((h.ts||'').slice(0,16).replace('T',' ')) + '</td>' +
-      '<td class="snip">' + esc((h.snippet||'').replace(/\[\[|\]\]/g,'')) + '</td>' +
-      '<td class="path mono">' + esc(h.path.split('/').pop()) + ':' + h.lineno + '</td></tr>').join('') +
-    '</tbody></table></div>';
+    '<div class="hitlist">' + r.merged.map((h, i) => {
+      const snip = esc((h.snippet || '').replace(/\s+/g, ' '))
+        .replace(/\[\[([\s\S]*?)\]\]/g, '<mark>$1</mark>');
+      return '<div class="hit" data-i="' + i + '" role="button" tabindex="0">' +
+        '<div class="hit-rank">' + (i + 1) + '</div>' +
+        '<div class="hit-ico ' + esc(h.source) + '">' + srcIcon(h.source) + '</div>' +
+        '<div class="hit-main"><div class="hit-meta">' +
+          '<span class="hosttag ' + (h.host === 'local' ? 'local' : '') + '">' + esc(h.host) + '</span>' +
+          '<span class="srcbadge">' + esc(h.source) + '</span>' +
+          '<span>' + esc(ROLE_LABEL[h.role] || h.role || '') + ' · ' + esc(KIND_LABEL[h.kind] || h.kind || '') + '</span>' +
+          '<span class="muted">' + esc((h.ts || '').slice(0, 16).replace('T', ' ')) + '</span>' +
+        '</div>' +
+        '<div class="hit-snip">' + snip + '</div>' +
+        '<div class="hit-path mono">' + esc(h.path.split('/').pop()) + ' : ' + h.lineno + '</div></div>' +
+        '<div class="hit-go">' + iconChevron() + '</div></div>';
+    }).join('') + '</div>';
   addLog('搜索「' + query + '」：' + r.per_host.map(h => h.host + ' ' + (h.ok ? h.ms + 'ms' : '✗')).join('，'));
 }
-document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') runSearchVia(e.target); });
-function runSearchVia() { runSearch(); }
+document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') runSearch(); });
+document.getElementById('searchOut').addEventListener('click', e => {
+  const el = e.target.closest('.hit');
+  if (el && LAST_HITS[+el.dataset.i]) {
+    const h = LAST_HITS[+el.dataset.i];
+    openSession(h.path, h.host, h.lineno, LAST_TERMS);
+  }
+});
+document.getElementById('searchOut').addEventListener('keydown', e => {
+  if (e.key !== 'Enter' && e.key !== ' ') return;
+  const el = e.target.closest('.hit');
+  if (el && LAST_HITS[+el.dataset.i]) {
+    e.preventDefault();
+    const h = LAST_HITS[+el.dataset.i];
+    openSession(h.path, h.host, h.lineno, LAST_TERMS);
+  }
+});
+
+/* ---------- session transcript ---------- */
+let SESS = null;
+const EXPANDED = new Set();
+
+function showSession() {
+  document.querySelectorAll('.nav a').forEach(a => a.classList.remove('active'));
+  document.querySelectorAll('.view').forEach(v => v.classList.remove('active'));
+  document.getElementById('view-session').classList.add('active');
+  document.getElementById('pageTitle').textContent = TITLES.session;
+}
+function closeSession() {
+  SESS = null;
+  history.pushState(null, '', '#search');
+  go('search');
+}
+window.addEventListener('popstate', () => {
+  if (location.hash === '#search') { SESS = null; go('search'); }
+  else if (location.hash.startsWith('#session')) openSessionFromHash(true);
+});
+function openSessionFromHash(replace) {
+  const p = new URLSearchParams(location.hash.slice(9));
+  const path = p.get('path');
+  if (!path) { go('search'); return; }
+  const terms = p.get('q') ? p.get('q').split(/\s+/).filter(Boolean) : [];
+  openSession(path, p.get('host') || 'local', parseInt(p.get('line'), 10) || 0, terms, replace);
+}
+async function openSession(path, host, lineno, terms, replace) {
+  host = host || 'local';
+  terms = terms || [];
+  showSession();
+  EXPANDED.clear();
+  SESS = null;
+  document.getElementById('sessTitle').textContent = path.split('/').pop();
+  document.getElementById('sessSub').textContent = host + ' · ' + path;
+  document.getElementById('sessMeta').textContent = '加载中…';
+  document.getElementById('sessBody').innerHTML =
+    '<div class="empty"><span class="spin" style="display:inline-block;width:18px;height:18px;border-width:2.5px"></span><br>正在读取会话…</div>';
+  const q = new URLSearchParams({ path, host, line: String(lineno || '') });
+  if (terms.length) q.set('q', terms.join(' '));
+  if (replace) history.replaceState(null, '', '#session?' + q.toString());
+  else history.pushState(null, '', '#session?' + q.toString());
+  const r = await api('/api/session', { path, host, raw: false });
+  if (!r.ok) {
+    document.getElementById('sessBody').innerHTML = '<div class="empty">加载失败：' + esc(r.error) + '</div>';
+    toast('会话加载失败：' + r.error, 'err');
+    return;
+  }
+  initSession(r.session, host, lineno, terms, false);
+}
+function initSession(data, host, anchor, terms, raw) {
+  SESS = { data, host, anchor, terms, raw, lo: 0, hi: data.count, matched: [], cur: -1 };
+  const idx = Math.max(0, data.messages.findIndex(m => m.lineno === anchor));
+  if (data.count > 240) {
+    SESS.lo = Math.max(0, idx - 90);
+    SESS.hi = Math.min(data.count, idx + 91);
+  }
+  const tt = terms.map(t => t.toLowerCase());
+  if (tt.length) data.messages.forEach((m, i) => {
+    const txt = (m.text || '').toLowerCase();
+    if (tt.every(t => txt.includes(t))) SESS.matched.push(i);
+  });
+  SESS.cur = SESS.matched.find(i => i >= idx);
+  if (SESS.cur === undefined) SESS.cur = SESS.matched[0] === undefined ? -1 : SESS.matched[0];
+  renderSession('anchor');
+}
+function escRe(s) { return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&'); }
+function renderBody(text, terms) {
+  let h = esc(text == null ? '' : text);
+  (terms || []).forEach(t => {
+    if (!t) return;
+    h = h.replace(new RegExp('(' + escRe(esc(t)) + ')', 'gi'), '<mark>$1</mark>');
+  });
+  h = h.replace(/```[^\n]*\n?([\s\S]*?)(?:```|$)/g,
+    (m, code) => '<pre class="codeblock">' + code.replace(/\n$/, '') + '</pre>');
+  h = h.replace(/(^|[\s(\[])`([^`\n]{1,200})`(?=$|[\s).,:;!?\]])/g, '$1<code>$2</code>');
+  return h;
+}
+function fmtMsgTs(ts) {
+  if (!ts) return '';
+  const d = new Date(ts);
+  return isNaN(d) ? String(ts).slice(11, 19) : d.toLocaleTimeString();
+}
+function renderSession(mode) {
+  if (!SESS) return;
+  const s = SESS.data;
+  const prevH = document.body.scrollHeight;
+  const rawBtn = document.getElementById('sessRaw');
+  rawBtn.textContent = SESS.raw ? '返回索引版' : '读取全文';
+  rawBtn.classList.toggle('primary', !SESS.raw);
+  document.getElementById('sessMeta').innerHTML =
+    '<span class="hosttag ' + (SESS.host === 'local' ? 'local' : '') + '">' + esc(SESS.host) + '</span>' +
+    '<span class="srcbadge">' + esc(s.source || '') + '</span>' +
+    '<span>' + s.count + ' 条消息 · ' +
+    esc((s.started_at || '').slice(0, 16).replace('T', ' ')) + ' → ' + esc((s.ended_at || '').slice(11, 19)) + '</span>' +
+    (SESS.raw ? '<span class="pill warn">原始全文</span>' : '<span class="pill idle">索引版 · 单条≤20k</span>') +
+    (s.cwd ? '<span class="muted mono">' + esc(s.cwd) + '</span>' : '');
+  const rows = [];
+  if (SESS.lo > 0)
+    rows.push('<div class="loadbar"><button onclick="expandOlder()">↑ 加载更早 ' + Math.min(120, SESS.lo) + ' 条</button></div>');
+  s.messages.slice(SESS.lo, SESS.hi).forEach((m, off) => {
+    const i = SESS.lo + off;
+    const isHit = m.lineno === SESS.anchor;
+    const long = (m.text || '').length > 1200 || (m.text || '').split('\n').length > 24;
+    const clamp = long && !EXPANDED.has(i);
+    rows.push(
+      '<div class="msg role-' + esc(m.role || '') + ' kind-' + esc(m.kind || '') + (isHit ? ' hit' : '') + '" data-i="' + i + '">' +
+      '<div class="msg-av ' + esc(m.role || 'assistant') + '">' + roleIcon(m.role) + '</div>' +
+      '<div class="msg-main"><div class="msg-h">' +
+        '<span class="who">' + esc(ROLE_LABEL[m.role] || m.role || '?') + '</span>' +
+        '<span class="kbadge k-' + esc(m.kind || '') + '">' + esc(KIND_LABEL[m.kind] || m.kind || '') + '</span>' +
+        '<span class="ln mono muted">L' + m.lineno + '</span>' +
+        '<span class="muted">' + fmtMsgTs(m.ts) + '</span>' +
+      '</div>' +
+      '<div class="mbody' + (clamp ? ' clamp' : '') + '">' + renderBody(m.text, SESS.terms) + '</div>' +
+      (clamp ? '<button class="mexpand" onclick="expandMsg(' + i + ')">展开全部 ↓</button>' : '') +
+      '</div></div>');
+  });
+  if (SESS.hi < s.count)
+    rows.push('<div class="loadbar"><button onclick="expandNewer()">加载更晚 ' + Math.min(120, s.count - SESS.hi) + ' 条 ↓</button></div>');
+  document.getElementById('sessBody').innerHTML = '<div class="trans">' + rows.join('') + '</div>';
+  const n = SESS.matched.length;
+  const pos = n ? SESS.matched.indexOf(SESS.cur) + 1 : 0;
+  const pb = document.getElementById('sessPrev'), nb = document.getElementById('sessNext');
+  pb.disabled = nb.disabled = n === 0;
+  pb.textContent = n ? '↑ ' + pos + '/' + n : '↑';
+  nb.textContent = '↓';
+  requestAnimationFrame(() => {
+    if (mode === 'anchor' || mode === 'match') {
+      const sel = mode === 'match' ? '.msg[data-i="' + SESS.cur + '"]' : '.msg.hit';
+      const el = document.querySelector(sel) || document.querySelector('.trans');
+      if (el) el.scrollIntoView({ block: mode === 'anchor' ? 'start' : 'center' });
+      if (mode === 'anchor') window.scrollBy(0, -76);
+    } else if (mode === 'older') {
+      window.scrollBy(0, document.body.scrollHeight - prevH);
+    }
+  });
+}
+function expandOlder() { SESS.lo = Math.max(0, SESS.lo - 120); renderSession('older'); }
+function expandNewer() { SESS.hi = Math.min(SESS.data.count, SESS.hi + 120); renderSession('stay'); }
+function expandMsg(i) { EXPANDED.add(i); renderSession('stay'); }
+function gotoMatch(dir) {
+  if (!SESS || !SESS.matched.length) return;
+  let pos = SESS.matched.indexOf(SESS.cur);
+  if (pos < 0) pos = 0; else pos = (pos + dir + SESS.matched.length) % SESS.matched.length;
+  SESS.cur = SESS.matched[pos];
+  if (SESS.cur < SESS.lo) SESS.lo = Math.max(0, SESS.cur - 90);
+  if (SESS.cur >= SESS.hi) SESS.hi = Math.min(SESS.data.count, SESS.cur + 91);
+  renderSession('match');
+}
+async function toggleRaw() {
+  if (!SESS) return;
+  const next = !SESS.raw;
+  if (next) toast('从原始 JSONL 读取未截断全文，大会话可能较慢…');
+  const r = await api('/api/session', { path: SESS.data.path, host: SESS.host, raw: next });
+  if (!r.ok) { toast('读取失败：' + r.error, 'err'); return; }
+  initSession(r.session, SESS.host, SESS.anchor, SESS.terms, next);
+}
+function copySessionPath() {
+  if (!SESS) return;
+  navigator.clipboard.writeText(SESS.data.path).then(
+    () => toast('已复制会话路径', 'ok'),
+    () => toast('复制失败', 'err'));
+}
 
 /* ---------- icons ---------- */
 function iconDb() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>'; }
 function iconMsg() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'; }
 function iconDev() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="7" rx="2"/><rect x="2" y="13" width="20" height="7" rx="2"/><path d="M6 7.5h.01M6 16.5h.01"/></svg>'; }
 function iconClock() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'; }
+function srcIcon(s) {
+  if (s === 'claude')
+    return '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 2.5c.5 3.9 2.1 6.1 5.2 7.1-3.1 1-4.7 3.2-5.2 7.1-.5-3.9-2.1-6.1-5.2-7.1C9.9 8.6 11.5 6.4 12 2.5Z"/><path d="M18.5 14.5c.3 2 1.1 3.1 2.7 3.6-1.6.5-2.4 1.6-2.7 3.6-.3-2-1.1-3.1-2.7-3.6 1.6-.5 2.4-1.6 2.7-3.6Z" opacity=".85"/></svg>';
+  if (s === 'codex')
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="m8 8-4 4 4 4M16 8l4 4-4 4M13 5l-2 14"/></svg>';
+  return '<span style="font-family:Georgia,serif;font-size:16px;font-weight:700;line-height:1">π</span>';
+}
+function iconChevron() {
+  return '<svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m9 6 6 6-6 6"/></svg>';
+}
+function roleIcon(role) {
+  if (role === 'user')
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="8" r="3.5"/><path d="M5 20c1.2-3.5 4-5 7-5s5.8 1.5 7 5"/></svg>';
+  if (role === 'tool')
+    return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="m6 6 12 12M5 12l7-7 3 3-7 7-3-3ZM15 5l4 4"/></svg>';
+  return '<svg viewBox="0 0 24 24" fill="currentColor"><path d="M12 3l1.9 5.6L19.5 10l-5.6 1.9L12 17.5l-1.9-5.6L4.5 10l5.6-1.4L12 3Z"/><path d="M19 15l.8 2.2L22 18l-2.2.8L19 21l-.8-2.2L16 18l2.2-.8L19 15Z" opacity=".8"/></svg>';
+}
 
 refresh(true);
 </script>

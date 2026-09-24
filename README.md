@@ -9,9 +9,10 @@ Zero dependencies: Python 3.7+ and SQLite FTS5 only.
 - One SQLite FTS5 index over all three agents' JSONL session logs; incremental sync by file mtime/size.
 - English prefix matching and Chinese substring matching (unigram + bigram column), BM25 ranking.
 - Normalized message schema (text / summary / reasoning / tool_call / tool_result) with noise filtered.
+- Click through from any search hit to the whole session it belongs to: the dashboard renders the full transcript as a chat thread — user bubbles, assistant narration, collapsible reasoning/tool-call/tool-result blocks, term highlighting, and prev/next navigation between matches. A raw mode reads the untruncated bodies straight from the JSONL.
 - CLI, an MCP server (Claude Code, Codex), and a native Pi extension.
-- Multi-device federated search: queries fan out over SSH to remote devboxes in parallel and merge by reciprocal rank fusion; `context` is routed to the device that holds the hit. No session content is copied off the remote device.
-- Local-only web dashboard for connectivity checks, per-device index stats, and search latency diagnostics.
+- Multi-device federated search: queries fan out over SSH to remote devboxes in parallel and merge by reciprocal rank fusion; `context` and the session view are routed to the device that holds the hit. No session content is copied off the remote device.
+- Local-only web dashboard for browser search and session reading, plus connectivity checks, per-device index stats, and search latency diagnostics.
 
 ## Install
 
@@ -56,10 +57,10 @@ agentsearch session <path> [--host HOST] [--head N] [--tail N] [--raw] [--json] 
 agentsearch index            # incremental local reindex
 agentsearch status           # counts and last sync
 agentsearch mcp              # stdio MCP server
-agentsearch dashboard        # local web admin panel (127.0.0.1, token-gated)
+agentsearch dashboard        # local web panel (127.0.0.1, token-gated)
 ```
 
-Multiple keywords are AND-ed. Each search hit carries `host`, `source`, `cwd`, `ts`, `role`, `kind`, `snippet`, `path`, `lineno`; use `context` with the hit's `host` to read surrounding messages.
+Multiple keywords are AND-ed. Each hit carries `host`, `source`, `cwd`, `ts`, `role`, `kind`, `snippet`, `path`, `lineno`; use `context` with the hit's `host` to read surrounding messages, or open the session in the dashboard to read the full transcript with highlights.
 
 ### Remote devices
 
@@ -78,9 +79,9 @@ Remotes are configured per device, so devices can form a mesh: run `remote add` 
 
 ```
 agentsearch/index.py      # SQLite FTS5 schema, incremental sync
-agentsearch/search.py     # query builder (CJK grams), BM25 search, context lookup
+agentsearch/search.py     # query builder (CJK grams), BM25 search, context/session lookup
 agentsearch/remote.py     # SSH fan-out, RRF merge, remote install
-agentsearch/dashboard.py  # stdlib web admin panel
+agentsearch/dashboard.py  # stdlib web panel: search UI, session transcript, admin
 agentsearch/mcp_server.py # zero-dep JSON-RPC stdio MCP server
 agentsearch/sources/      # per-agent JSONL adapters
 bin/agentsearch           # launcher

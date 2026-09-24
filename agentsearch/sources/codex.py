@@ -29,9 +29,10 @@ class CodexSource(Source):
                     if n.endswith(".jsonl"):
                         yield os.path.join(dirpath, n)
 
-    def parse(self, path):
+    def parse(self, path, clip_text=True):
         sid = ""
         cwd = ""
+        clipf = clip if clip_text else (lambda t: t)
         msgs = []
         for lineno, d in self.read_jsonl(path):
             t = d.get("type")
@@ -56,23 +57,23 @@ class CodexSource(Source):
                 text = self._message_text(p.get("content"))
                 text = ENV_CONTEXT.sub("", text).strip()
                 if text:
-                    msgs.append((lineno, Msg(ts, role, "text", clip(text))))
+                    msgs.append((lineno, Msg(ts, role, "text", clipf(text))))
             elif pt == "reasoning":
                 text = self._reasoning_text(p)
                 if text:
-                    msgs.append((lineno, Msg(ts, "assistant", "reasoning", clip(text))))
+                    msgs.append((lineno, Msg(ts, "assistant", "reasoning", clipf(text))))
             elif pt in ("function_call", "custom_tool_call"):
                 args = p.get("arguments", "")
                 if not isinstance(args, str):
                     args = json.dumps(args, ensure_ascii=False)
                 name = p.get("name") or pt
-                msgs.append((lineno, Msg(ts, "assistant", "tool_call", clip("%s(%s)" % (name, args)))))
+                msgs.append((lineno, Msg(ts, "assistant", "tool_call", clipf("%s(%s)" % (name, args)))))
             elif pt in ("function_call_output", "custom_tool_call_output"):
                 out = p.get("output", "")
                 if not isinstance(out, str):
                     out = json.dumps(out, ensure_ascii=False)
                 if out:
-                    msgs.append((lineno, Msg(ts, "tool", "tool_result", clip(out))))
+                    msgs.append((lineno, Msg(ts, "tool", "tool_result", clipf(out))))
         return sid, cwd, msgs
 
     @staticmethod

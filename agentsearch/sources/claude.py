@@ -33,9 +33,10 @@ class ClaudeSource(Source):
                 if n.endswith(".jsonl"):
                     yield os.path.join(dirpath, n)
 
-    def parse(self, path):
+    def parse(self, path, clip_text=True):
         sid = os.path.splitext(os.path.basename(path))[0]
         cwd = decode_cwd_dir(os.path.basename(os.path.dirname(path)))
+        clipf = clip if clip_text else (lambda t: t)
         msgs = []
         for lineno, d in self.read_jsonl(path):
             t = d.get("type")
@@ -53,12 +54,12 @@ class ClaudeSource(Source):
                     if role == "user" and kind == "text":
                         text = clean_user_text(text)
                     if text:
-                        msgs.append((lineno, Msg(ts, role, kind, clip(text))))
+                        msgs.append((lineno, Msg(ts, role, kind, clipf(text))))
             elif t == "summary":
                 text = d.get("summary")
                 if text:
                     msgs.append(
-                        (lineno, Msg(norm_ts(d.get("timestamp")), "user", "summary", clip(text)))
+                        (lineno, Msg(norm_ts(d.get("timestamp")), "user", "summary", clipf(text)))
                     )
         return sid, cwd, msgs
 

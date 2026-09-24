@@ -14,8 +14,12 @@ class Source:
         """Yield session file paths."""
         raise NotImplementedError
 
-    def parse(self, path):
-        """Return (session_id, cwd, [(lineno, Msg), ...])."""
+    def parse(self, path, clip_text=True):
+        """Return (session_id, cwd, [(lineno, Msg), ...]).
+
+        clip_text=False bypasses the per-message 20k-character cap, reading
+        full bodies straight from the session file.
+        """
         raise NotImplementedError
 
     @staticmethod

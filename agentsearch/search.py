@@ -1,4 +1,5 @@
 from .model import CJK_RUN, has_cjk
+from .sources import SOURCES
 
 DEFAULT_KINDS = ("text", "summary", "tool_call", "tool_result")
 
@@ -118,6 +119,56 @@ def get_session(index, path):
         "count": len(messages),
         "messages": messages,
     }
+
+
+def _source_for(index, path):
+    row = index.db.execute(
+        "SELECT source FROM files WHERE path = ?", (path,)
+    ).fetchone()
+    if not row:
+        return None
+    cls = SOURCES.get(row["source"])
+    return cls() if cls else None
+
+
+def raw_session(index, path):
+    """Read the full session straight from its JSONL file, no 20k cap."""
+    source = _source_for(index, path)
+    if source is None:
+        return None
+    sid, cwd, parsed = source.parse(path, clip_text=False)
+    messages = [
+        {"lineno": lineno, "ts": m.ts, "role": m.role, "kind": m.kind, "text": m.text}
+        for lineno, m in parsed
+    ]
+    return {
+        "path": path,
+        "source": source.name,
+        "session_id": sid,
+        "cwd": cwd,
+        "started_at": messages[0]["ts"] if messages else "",
+        "ended_at": messages[-1]["ts"] if messages else "",
+        "count": len(messages),
+        "messages": messages,
+        "raw": True,
+    }
+
+
+def raw_context(index, path, line, before=4, after=8):
+    sess = raw_session(index, path)
+    if sess is None:
+        return None
+    messages = sess["messages"]
+    hits = [i for i, m in enumerate(messages) if m["lineno"] == line]
+    if not hits:
+        return []
+    lo = max(0, hits[0] - before)
+    hi = min(len(messages), hits[-1] + 1 + after)
+    hit_set = set(hits)
+    window = messages[lo:hi]
+    for offset, m in enumerate(window):
+        m["hit"] = (lo + offset) in hit_set
+    return window
 
 
 def get_context(index, path, line, before=4, after=8, home=None):

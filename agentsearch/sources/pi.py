@@ -19,10 +19,11 @@ class PiSource(Source):
                 if n.endswith(".jsonl"):
                     yield os.path.join(dirpath, n)
 
-    def parse(self, path):
+    def parse(self, path, clip_text=True):
         # filename: 2026-09-01T09-46-41-101Z_<uuid>.jsonl
         sid = os.path.splitext(os.path.basename(path))[0].split("_", 1)[-1]
         cwd = decode_cwd_dir(os.path.basename(os.path.dirname(path)))
+        clipf = clip if clip_text else (lambda t: t)
         msgs = []
         for lineno, d in self.read_jsonl(path):
             t = d.get("type")
@@ -43,7 +44,7 @@ class PiSource(Source):
                     if role == "tool" and kind == "text":
                         kind = "tool_result"
                     if text:
-                        msgs.append((lineno, Msg(ts, role, kind, clip(text))))
+                        msgs.append((lineno, Msg(ts, role, kind, clipf(text))))
         return sid, cwd, msgs
 
     @staticmethod

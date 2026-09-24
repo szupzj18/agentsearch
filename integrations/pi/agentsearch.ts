@@ -87,6 +87,9 @@ export default function (pi) {
       ),
       before: Type.Optional(Type.Number()),
       after: Type.Optional(Type.Number()),
+      raw: Type.Optional(
+        Type.Boolean({ description: "read full untruncated bodies from the original session file" })
+      ),
     }),
     async execute(_toolCallId, params) {
       const args = [
@@ -100,6 +103,7 @@ export default function (pi) {
         String(params.after ?? 8),
       ];
       if (params.host) args.push("--host", params.host);
+      if (params.raw) args.push("--raw");
       const text = await run(args);
       return { content: [{ type: "text", text }], details: {} };
     },
@@ -119,12 +123,16 @@ export default function (pi) {
       ),
       head: Type.Optional(Type.Number({ description: "only the first N messages" })),
       tail: Type.Optional(Type.Number({ description: "only the last N messages" })),
+      raw: Type.Optional(
+        Type.Boolean({ description: "read full untruncated bodies straight from the original session JSONL" })
+      ),
     }),
     async execute(_toolCallId, params) {
       const args = ["session", params.path, "--json"];
       if (params.head) args.push("--head", String(params.head));
       if (params.tail) args.push("--tail", String(params.tail));
       if (params.host) args.push("--host", params.host);
+      if (params.raw) args.push("--raw");
       const text = await run(args, 60000);
       return { content: [{ type: "text", text }], details: {} };
     },

@@ -53,7 +53,9 @@ To read the entire session a hit belongs to (the hit's `path` is one JSONL sessi
 agentsearch session <path> --host <hit-host> --json [--head N] [--tail N]
 ```
 
-MCP/Pi expose the same as `get_session` / `get_full_session`. A session can be long; prefer `context` for one detail and use `--head`/`--tail` to skim a long session before pulling all of it. Indexed message bodies are capped at 20k characters each.
+MCP/Pi expose the same as `get_session` / `get_full_session`. A session can be long; prefer `context` for one detail and use `--head`/`--tail` to skim a long session before pulling all of it.
+
+Indexed message bodies are capped at 20k characters each (long tool outputs are clipped with a `…[truncated]` marker). To read the original full content straight from the session JSONL, add `--raw` to `context`/`session` (MCP/Pi: `raw: true`). Raw reads execute on the device that holds the file, so remote content still does not leave it except in the query response.
 
 ## Keeping the index fresh
 

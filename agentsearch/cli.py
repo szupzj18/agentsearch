@@ -8,7 +8,7 @@ from . import __version__
 from .index import DEFAULT_DB_PATH, Index
 from . import remote as remote_mod
 from .remote import LOCAL, RemoteError, fan_out_search, remote_context, remote_session
-from .search import DEFAULT_KINDS, get_context, get_session
+from .search import DEFAULT_KINDS, get_context, get_session, raw_context, raw_session
 from .sources import SOURCES
 
 BOLD = "\033[1m"
@@ -100,11 +100,11 @@ def _slice(messages, head, tail):
     return messages
 
 
-def _print_messages(path, rows):
+def _print_messages(path, rows, full_text=False):
     for r in rows:
         print("%s%s:%d%s  %s%s/%s%s" % (BOLD, path, r["lineno"], RESET, DIM, r["role"], r["kind"], RESET))
         text = r["text"]
-        if len(text) > 2000:
+        if not full_text and len(text) > 2000:
             text = text[:2000] + " …[truncated]"
         for ln in text.splitlines():
             print("    " + ln)
@@ -116,11 +116,11 @@ def cmd_session(args):
     try:
         if host == LOCAL:
             idx = Index(args.db)
-            sess = get_session(idx, args.path)
+            sess = raw_session(idx, args.path) if args.raw else get_session(idx, args.path)
         else:
             sess = remote_session(
                 remote_mod.get_remote(host), args.path,
-                head=args.head, tail=args.tail,
+                head=args.head, tail=args.tail, raw=args.raw,
             )
     except RemoteError as exc:
         print("error: %s" % exc, file=sys.stderr)
@@ -133,13 +133,14 @@ def cmd_session(args):
     if args.json:
         print(json.dumps(sess, ensure_ascii=False, indent=2))
         return 0
-    print("%s%s%s  source=%s  cwd=%s" % (
-        BOLD, args.path, RESET, sess["source"], sess["cwd"]))
+    print("%s%s%s  source=%s  cwd=%s%s" % (
+        BOLD, args.path, RESET, sess["source"], sess["cwd"],
+        "  RAW (full bodies from file)" if args.raw else ""))
     print("%s%s → %s  %d messages (showing %d)%s\n" % (
         DIM, (sess["started_at"] or "")[:16].replace("T", " "),
         (sess["ended_at"] or "")[:16].replace("T", " "),
         sess["count"], len(sess["messages"]), RESET))
-    _print_messages(args.path, sess["messages"])
+    _print_messages(args.path, sess["messages"], full_text=args.raw)
     return 0
 
 
@@ -147,11 +148,13 @@ def cmd_context(args):
     host = args.host or LOCAL
     if host == LOCAL:
         idx = Index(args.db)
-        rows = get_context(idx, args.path, args.line, args.before, args.after)
+        rows = raw_context(idx, args.path, args.line, args.before, args.after) if args.raw \
+            else get_context(idx, args.path, args.line, args.before, args.after)
     else:
         try:
             rows = remote_context(
-                remote_mod.get_remote(host), args.path, args.line, args.before, args.after
+                remote_mod.get_remote(host), args.path, args.line,
+                args.before, args.after, raw=args.raw,
             )
         except RemoteError as exc:
             print("error: %s" % exc, file=sys.stderr)
@@ -300,6 +303,7 @@ def main(argv=None):
     sp.add_argument("--before", type=int, default=4)
     sp.add_argument("--after", type=int, default=8)
     sp.add_argument("--host", help="device holding the hit (default: local)")
+    sp.add_argument("--raw", action="store_true", help="read full bodies from the original session file (no 20k cap)")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_context)
 
@@ -308,6 +312,7 @@ def main(argv=None):
     sp.add_argument("--host", help="device holding the session (default: local)")
     sp.add_argument("--head", type=int, default=0, help="only first N messages")
     sp.add_argument("--tail", type=int, default=0, help="only last N messages")
+    sp.add_argument("--raw", action="store_true", help="read full bodies from the original session file (no 20k cap)")
     sp.add_argument("--json", action="store_true")
     sp.set_defaults(func=cmd_session)
 

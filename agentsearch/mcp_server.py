@@ -5,7 +5,7 @@ from . import __version__
 from .index import Index
 from . import remote as remote_mod
 from .remote import LOCAL, fan_out_search, remote_context, remote_session
-from .search import DEFAULT_KINDS, get_context, get_session
+from .search import DEFAULT_KINDS, get_context, get_session, raw_context, raw_session
 
 
 def build_tools():
@@ -51,6 +51,7 @@ def build_tools():
                     "host": {"type": "string", "description": "device holding the hit, from the search result (default: local)"},
                     "before": {"type": "integer", "description": "messages before the hit (default 4)"},
                     "after": {"type": "integer", "description": "messages after the hit (default 8)"},
+                    "raw": {"type": "boolean", "description": "read full untruncated bodies from the original session file"},
                 },
                 "required": ["path", "line"],
             },
@@ -60,8 +61,9 @@ def build_tools():
             "description": (
                 "Fetch every indexed message of the whole session file that a search hit belongs to"
                 " (same normalized format), ordered by time. Use after get_context when you need the"
-                " full conversation rather than a window around one line. Each message body is capped"
-                " at 20k characters in the index. head/tail select only the first/last N messages."
+                " full conversation rather than a window around one line. Message bodies are capped"
+                " at 20k characters in the index; pass raw=true to read the original session file with"
+                " full bodies. head/tail select only the first/last N messages."
             ),
             "inputSchema": {
                 "type": "object",
@@ -70,6 +72,7 @@ def build_tools():
                     "host": {"type": "string", "description": "device holding the session, from the search result (default: local)"},
                     "head": {"type": "integer", "description": "only return the first N messages"},
                     "tail": {"type": "integer", "description": "only return the last N messages"},
+                    "raw": {"type": "boolean", "description": "read full untruncated bodies straight from the original session JSONL"},
                 },
                 "required": ["path"],
             },
@@ -127,35 +130,33 @@ def handle_call(name, args, index):
         return {"content": [{"type": "text", "text": text}]}
     if name == "get_context":
         host = args.get("host") or LOCAL
+        raw = bool(args.get("raw"))
+        before, after = int(args.get("before", 4)), int(args.get("after", 8))
         if host == LOCAL:
-            rows = get_context(
-                index,
-                args["path"],
-                int(args["line"]),
-                before=int(args.get("before", 4)),
-                after=int(args.get("after", 8)),
-            )
+            rows = raw_context(index, args["path"], int(args["line"]), before, after) if raw \
+                else get_context(index, args["path"], int(args["line"]), before, after)
         else:
             rows = remote_context(
                 remote_mod.get_remote(host),
                 args["path"],
                 int(args["line"]),
-                int(args.get("before", 4)),
-                int(args.get("after", 8)),
+                before,
+                after,
+                raw=raw,
             )
         if rows is None:
             raise ValueError("path not in index; run reindex")
         return _text_result(rows)
     if name == "get_session":
         host = args.get("host") or LOCAL
-        head = args.get("head")
-        tail = args.get("tail")
+        raw = bool(args.get("raw"))
+        head, tail = args.get("head"), args.get("tail")
         if host == LOCAL:
-            sess = get_session(index, args["path"])
+            sess = raw_session(index, args["path"]) if raw else get_session(index, args["path"])
         else:
             sess = remote_session(
                 remote_mod.get_remote(host), args["path"],
-                head=head, tail=tail,
+                head=head, tail=tail, raw=raw,
             )
         if sess is None:
             raise ValueError("path not in index; run reindex")

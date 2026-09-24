@@ -62,7 +62,7 @@ def diagnose_search(query, hosts, limit):
     wanted = set(hosts) if hosts else None
     selected = [r for r in remotes if wanted is None or r["name"] in wanted]
     include_local = wanted is None or LOCAL in wanted
-    per_host, warnings = [], []
+    per_host, warnings, payload = [], [], []
 
     jobs = {}
     with concurrent.futures.ThreadPoolExecutor(max_workers=len(selected) + 1) as pool:
@@ -74,7 +74,6 @@ def diagnose_search(query, hosts, limit):
                 return remote_mod._remote_search(
                     r, query, None, list(DEFAULT_KINDS), None, None, limit, True)
             jobs[pool.submit(_time, run_remote)] = r["name"]
-        payload = []
         for fut in concurrent.futures.as_completed(jobs):
             name = jobs[fut]
             try:
@@ -233,218 +232,518 @@ def serve(port=DEFAULT_PORT, open_browser=True):
 
 
 PAGE = r"""<!doctype html>
-<html lang="zh"><head><meta charset="utf-8">
+<html lang="zh" data-theme="light"><head><meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <meta name="token" content="__TOKEN__">
 <title>agentsearch 管理面板</title>
 <style>
-:root { color-scheme: dark; }
+:root {
+  --bg: #eff2f7;
+  --bg-grad: linear-gradient(120deg,#f0f7ff 0%,#e7f2ff 50%,#edf7ff 100%);
+  --blob-1: rgba(122,162,255,.45); --blob-2: rgba(107,197,255,.4);
+  --surface: rgba(255,255,255,.92);
+  --surface-2: #ffffff;
+  --surface-soft: rgba(255,255,255,.62);
+  --border: rgba(15,23,42,.08);
+  --border-strong: rgba(15,23,42,.14);
+  --text: #2c3e50; --text-2: #5f6c7b; --text-3: #8b95a6;
+  --accent: #3b82f6; --accent-soft: rgba(59,130,246,.1); --accent-border: rgba(59,130,246,.3);
+  --ok: #16a34a; --ok-soft: rgba(22,163,74,.12);
+  --warn: #d97706; --warn-soft: rgba(245,158,11,.14);
+  --err: #dc2626; --err-soft: rgba(220,38,38,.1);
+  --sidebar-bg: rgba(255,255,255,.6);
+  --hover: rgba(59,130,246,.08);
+  --shadow: 0 8px 24px rgba(31,38,135,.08);
+  --r-lg: 16px; --r-md: 10px; --r-sm: 8px;
+}
+[data-theme="dark"] {
+  --bg: #14161b;
+  --bg-grad: linear-gradient(120deg,#161a22 0%,#151925 50%,#141a1f 100%);
+  --blob-1: rgba(59,130,246,.16); --blob-2: rgba(16,185,129,.08);
+  --surface: rgba(30,33,42,.92);
+  --surface-2: #20242d;
+  --surface-soft: rgba(255,255,255,.04);
+  --border: rgba(255,255,255,.08);
+  --border-strong: rgba(255,255,255,.14);
+  --text: #e6e8ee; --text-2: #9aa3b2; --text-3: #6f7888;
+  --accent-soft: rgba(59,130,246,.18); --accent-border: rgba(59,130,246,.4);
+  --ok: #4ade80; --ok-soft: rgba(74,222,128,.12);
+  --warn: #fbbf24; --warn-soft: rgba(251,191,36,.12);
+  --err: #f87171; --err-soft: rgba(248,113,113,.12);
+  --sidebar-bg: rgba(22,24,30,.6);
+  --hover: rgba(255,255,255,.06);
+  --shadow: 0 8px 24px rgba(0,0,0,.35);
+}
 * { box-sizing: border-box; }
-body { margin:0; background:#16181d; color:#e6e8ee; font:13px/1.5 -apple-system,"PingFang SC",sans-serif; }
-header { padding:16px 24px; background:#1d2027; border-bottom:1px solid #2c303a; display:flex; align-items:center; gap:12px; }
-h1 { font-size:15px; margin:0; font-weight:600; }
-h2 { font-size:13px; margin:0 0 10px; color:#9aa3b2; text-transform:uppercase; letter-spacing:.05em; }
-main { padding:20px 24px; max-width:1100px; }
-section { background:#1d2027; border:1px solid #2c303a; border-radius:8px; padding:16px; margin-bottom:16px; }
-.row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; }
-.grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(330px,1fr)); gap:12px; }
-.card { background:#20242d; border:1px solid #2f343f; border-radius:6px; padding:12px 14px; }
-.card.local { border-color:#3d5a45; }
-.name { font-weight:600; font-size:14px; }
-.badge { display:inline-block; padding:1px 7px; border-radius:10px; font-size:11px; margin-left:6px; }
-.badge.ok { background:#1e3a29; color:#5fd08a; }
-.badge.bad { background:#3d2226; color:#ff8089; }
-.badge.muted { background:#2c303a; color:#9aa3b2; }
-.kv { color:#9aa3b2; margin:6px 0; font-family:ui-monospace,Menlo,monospace; font-size:12px; word-break:break-all; }
-.kv b { color:#cfd6e2; font-weight:500; }
-button { background:#2b3140; color:#e6e8ee; border:1px solid #3d4452; border-radius:5px; padding:5px 11px; cursor:pointer; font-size:12px; }
-button:hover { background:#353c4d; }
-button.danger { border-color:#5a3038; color:#ff8089; }
-button:disabled { opacity:.5; cursor:default; }
-input[type=text],input[type=number] { background:#16181d; border:1px solid #3d4452; color:#e6e8ee; border-radius:5px; padding:6px 9px; font-size:12px; }
-input[type=text] { min-width:160px; }
-table { width:100%; border-collapse:collapse; font-size:12px; }
-th,td { text-align:left; padding:5px 8px; border-bottom:1px solid #2c303a; vertical-align:top; }
-th { color:#9aa3b2; font-weight:500; }
-code { font-family:ui-monospace,Menlo,monospace; color:#b8c2d4; }
-#log { background:#121419; border:1px solid #2c303a; border-radius:6px; padding:10px 12px; height:140px; overflow:auto;
-       font-family:ui-monospace,Menlo,monospace; font-size:11.5px; white-space:pre-wrap; }
-.log-err { color:#ff8089; } .log-ok { color:#5fd08a; }
-.hostchip { display:inline-block; padding:2px 9px; border-radius:10px; margin:2px 4px 2px 0; font-size:11.5px; font-family:ui-monospace,monospace; }
-.hostchip.ok { background:#1e3a29; color:#5fd08a; } .hostchip.bad { background:#3d2226; color:#ff8089; }
-.muted { color:#7c8595; }
-.snip { color:#b8c2d4; max-width:420px; }
-a { color:#7ab8ff; }
+body { margin:0; font:13.5px/1.55 -apple-system,BlinkMacSystemFont,"PingFang SC","Segoe UI",sans-serif;
+       color:var(--text); background:var(--bg); min-height:100vh; }
+body::before { content:""; position:fixed; inset:0; background:var(--bg-grad); z-index:-2; }
+body::after { content:""; position:fixed; inset:0; z-index:-1;
+  background:radial-gradient(420px 320px at 12% -5%, var(--blob-1), transparent 70%),
+            radial-gradient(480px 340px at 95% 0%, var(--blob-2), transparent 70%); }
+code,.mono { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:12px; }
+
+/* layout */
+.sidebar { position:fixed; inset:0 auto 0 0; width:210px; padding:18px 14px; z-index:20;
+  background:var(--sidebar-bg); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border-right:1px solid var(--border); display:flex; flex-direction:column; gap:6px; }
+.brand { display:flex; align-items:center; gap:10px; padding:4px 10px 18px; font-weight:700; font-size:15px; }
+.brand .logo { width:28px; height:28px; border-radius:8px; background:linear-gradient(135deg,#3b82f6,#22d3ee);
+  display:grid; place-items:center; color:#fff; flex:none; }
+.nav { display:flex; flex-direction:column; gap:3px; }
+.nav a { display:flex; align-items:center; gap:11px; padding:9px 12px; border-radius:var(--r-md);
+  color:var(--text-2); text-decoration:none; cursor:pointer; font-weight:500; transition:background .15s; }
+.nav a:hover { background:var(--hover); }
+.nav a.active { background:var(--surface-2); color:var(--text); box-shadow:0 1px 4px rgba(31,38,135,.08); border:1px solid var(--border); }
+.nav a.active svg { color:var(--accent); }
+.nav svg { width:18px; height:18px; flex:none; }
+.sidebar-foot { margin-top:auto; padding:10px 12px; color:var(--text-3); font-size:11.5px; }
+
+.main { margin-left:210px; padding:18px 28px 40px; }
+.header { display:flex; align-items:center; gap:12px; margin-bottom:18px; }
+.header h1 { font-size:19px; margin:0; font-weight:650; }
+.header .spacer { flex:1; }
+.iconbtn { display:inline-flex; align-items:center; gap:6px; }
+.iconbtn svg { width:15px; height:15px; }
+
+.card { background:var(--surface); backdrop-filter:blur(20px); -webkit-backdrop-filter:blur(20px);
+  border:1px solid var(--border); border-radius:var(--r-lg); box-shadow:var(--shadow); padding:20px 22px; margin-bottom:18px; }
+.card h2 { font-size:14px; font-weight:650; margin:0 0 14px; display:flex; align-items:center; gap:8px; }
+.card h2::before { content:""; width:3.5px; height:14px; border-radius:2px; background:var(--accent); }
+.card h2 .spacer { flex:1; }
+.grid { display:grid; gap:14px; }
+.g4 { grid-template-columns:repeat(auto-fill,minmax(220px,1fr)); }
+.g3 { grid-template-columns:repeat(auto-fill,minmax(280px,1fr)); }
+
+/* status banner */
+.banner { display:flex; align-items:center; gap:18px; flex-wrap:wrap; }
+.dot { width:9px; height:9px; border-radius:50%; background:var(--ok); box-shadow:0 0 0 4px var(--ok-soft); flex:none; }
+.dot.bad { background:var(--err); box-shadow:0 0 0 4px var(--err-soft); }
+.banner .k { color:var(--text-3); font-size:12px; }
+.banner .v { font-weight:600; }
+.pill { display:inline-flex; align-items:center; gap:5px; padding:2px 10px; border-radius:999px; font-size:12px; font-weight:600; }
+.pill.ok { background:var(--ok-soft); color:var(--ok); } .pill.bad { background:var(--err-soft); color:var(--err); }
+.pill.warn { background:var(--warn-soft); color:var(--warn); } .pill.idle { background:var(--surface-soft); color:var(--text-3); }
+
+/* stat cards */
+.stat { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:15px 17px; }
+.stat .top { display:flex; align-items:center; gap:10px; color:var(--text-3); font-size:12.5px; }
+.stat .ico { width:30px; height:30px; border-radius:8px; display:grid; place-items:center; background:var(--accent-soft); color:var(--accent); }
+.stat .ico svg { width:16px; height:16px; }
+.stat .num { font-size:26px; font-weight:700; margin:8px 0 2px; letter-spacing:-.02em; }
+.stat .sub { color:var(--text-3); font-size:11.5px; }
+
+/* device card */
+.dev { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md); padding:16px 18px; display:flex; flex-direction:column; gap:10px; }
+.dev .head { display:flex; align-items:center; gap:9px; }
+.dev .name { font-weight:650; font-size:14.5px; }
+.health { margin-left:auto; width:30px; height:30px; border-radius:50%; display:grid; place-items:center; }
+.health.ok { background:var(--ok-soft); color:var(--ok); } .health.bad { background:var(--err-soft); color:var(--err); }
+.health.unknown { background:var(--surface-soft); color:var(--text-3); }
+.health svg { width:15px; height:15px; }
+.dev .meta { color:var(--text-2); font-size:12px; display:grid; gap:3px; }
+.dev .meta b { color:var(--text); font-weight:550; }
+.dev .acts { display:flex; gap:7px; flex-wrap:wrap; margin-top:2px; }
+.spin { display:inline-block; width:12px; height:12px; border:2px solid currentColor; border-top-color:transparent; border-radius:50%; animation:rot .7s linear infinite; vertical-align:-2px; }
+@keyframes rot { to { transform:rotate(360deg); } }
+
+button { font:inherit; font-size:12.5px; font-weight:550; border-radius:var(--r-sm); cursor:pointer;
+  border:1px solid var(--border-strong); background:var(--surface-2); color:var(--text-2); padding:6px 13px; transition:all .15s; }
+button:hover { border-color:var(--accent-border); color:var(--accent); background:var(--hover); }
+button.primary { background:var(--accent); border-color:var(--accent); color:#fff; }
+button.primary:hover { filter:brightness(1.07); color:#fff; background:var(--accent); }
+button.danger { color:var(--err); } button.danger:hover { border-color:var(--err); background:var(--err-soft); color:var(--err); }
+button:disabled { opacity:.55; cursor:wait; }
+input,select { font:inherit; font-size:13px; background:var(--surface-2); border:1px solid var(--border-strong);
+  color:var(--text); border-radius:var(--r-sm); padding:7px 11px; outline:none; transition:border-color .15s; }
+input:focus { border-color:var(--accent); box-shadow:0 0 0 3px var(--accent-soft); }
+label.chk { display:inline-flex; align-items:center; gap:6px; color:var(--text-2); font-size:12.5px; cursor:pointer; user-select:none; }
+
+table { width:100%; border-collapse:collapse; font-size:12.5px; }
+th { text-align:left; color:var(--text-3); font-weight:550; padding:7px 9px; border-bottom:1px solid var(--border); white-space:nowrap; }
+td { padding:8px 9px; border-bottom:1px solid var(--border); vertical-align:top; }
+tr:last-child td { border-bottom:none; }
+tbody tr:hover { background:var(--surface-soft); }
+.hosttag { display:inline-block; padding:1.5px 9px; border-radius:999px; font-size:11.5px; font-weight:600;
+  background:var(--accent-soft); color:var(--accent); white-space:nowrap; }
+.hosttag.local { background:rgba(34,211,238,.14); color:#0891b2; }
+[data-theme="dark"] .hosttag.local { color:#67e8f9; }
+.hosttag.bad { background:var(--err-soft); color:var(--err); }
+.snip { color:var(--text-2); max-width:460px; }
+.path { color:var(--text-3); }
+.muted { color:var(--text-3); }
+.view { display:none; animation:fade .2s ease; }
+.view.active { display:block; }
+@keyframes fade { from { opacity:0; transform:translateY(4px); } to { opacity:1; transform:none; } }
+
+/* toasts */
+#toasts { position:fixed; top:18px; right:22px; z-index:60; display:flex; flex-direction:column; gap:9px; width:340px; }
+.toast { display:flex; gap:10px; align-items:flex-start; background:var(--surface-2); border:1px solid var(--border);
+  border-left:3px solid var(--accent); border-radius:var(--r-md); box-shadow:var(--shadow); padding:11px 14px;
+  animation:slidein .22s ease; }
+.toast.ok { border-left-color:var(--ok); } .toast.err { border-left-color:var(--err); }
+.toast .tmsg { font-size:12.5px; word-break:break-word; }
+.toast .tmsg small { color:var(--text-3); display:block; margin-top:2px; }
+@keyframes slidein { from { opacity:0; transform:translateX(16px); } to { opacity:1; transform:none; } }
+
+/* modal */
+#modal { position:fixed; inset:0; z-index:50; display:none; place-items:center;
+  background:rgba(15,23,42,.32); backdrop-filter:blur(2px); }
+#modal.show { display:grid; }
+.modal-box { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-lg);
+  box-shadow:0 20px 60px rgba(15,23,42,.25); width:420px; max-width:calc(100vw - 40px); padding:22px 24px; animation:pop .18s ease; }
+@keyframes pop { from { opacity:0; transform:scale(.96); } to { opacity:1; transform:none; } }
+.modal-box h3 { margin:0 0 8px; font-size:15px; } .modal-box p { margin:0 0 18px; color:var(--text-2); font-size:13px; word-break:break-word; }
+.modal-acts { display:flex; justify-content:flex-end; gap:9px; }
+
+#logbox { background:var(--surface-2); border:1px solid var(--border); border-radius:var(--r-md);
+  height:calc(100vh - 230px); min-height:300px; overflow:auto; padding:12px 16px;
+  font-family:ui-monospace,Menlo,monospace; font-size:12px; }
+.logline { padding:2.5px 0; color:var(--text-2); white-space:pre-wrap; }
+.logline .lt { color:var(--text-3); margin-right:8px; }
+.logline.ok { color:var(--ok); } .logline.err { color:var(--err); }
+.empty { text-align:center; color:var(--text-3); padding:44px 0; font-size:13px; }
+.empty svg { width:34px; height:34px; margin-bottom:8px; opacity:.5; }
+@media (max-width: 860px) {
+  .sidebar { width:54px; } .brand span, .nav a span, .sidebar-foot { display:none; }
+  .brand { justify-content:center; padding-left:0; padding-right:0; } .nav a { justify-content:center; }
+  .main { margin-left:54px; padding:14px; }
+}
 </style></head>
 <body>
-<header><h1>agentsearch 管理面板</h1><span class="muted" id="hdr"></span>
-  <span style="flex:1"></span>
-  <button onclick="pingAll()">测试全部连接</button>
-  <button onclick="syncAll()">全部增量同步</button>
-</header>
-<main>
-<section>
-  <h2>本机</h2>
-  <div class="card local" id="localCard"><span class="muted">加载中…</span></div>
-</section>
+<aside class="sidebar">
+  <div class="brand"><div class="logo">
+    <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg>
+  </div><span>agentsearch</span></div>
+  <nav class="nav" id="nav">
+    <a data-view="dashboard" class="active">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="3" width="7" height="9" rx="1.5"/><rect x="14" y="3" width="7" height="5" rx="1.5"/><rect x="14" y="12" width="7" height="9" rx="1.5"/><rect x="3" y="16" width="7" height="5" rx="1.5"/></svg><span>仪表盘</span></a>
+    <a data-view="devices">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="3" y="4" width="18" height="7" rx="2"/><rect x="3" y="13" width="18" height="7" rx="2"/><path d="M7 7.5h.01M7 16.5h.01"/></svg><span>设备管理</span></a>
+    <a data-view="search">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="11" cy="11" r="7"/><path d="m21 21-4.3-4.3"/></svg><span>搜索诊断</span></a>
+    <a data-view="logs">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 5h16M4 10h16M4 15h10M4 20h7"/></svg><span>日志查看</span></a>
+  </nav>
+  <div class="sidebar-foot">v0.1.0 · 127.0.0.1 本地服务</div>
+</aside>
 
-<section>
-  <h2>远程设备</h2>
-  <div class="grid" id="cards"><span class="muted">加载中…</span></div>
-  <div class="row" style="margin-top:12px">
-    <input type="text" id="addName" placeholder="名称 如 devbox-109">
-    <input type="text" id="addHost" placeholder="SSH host（默认同名称）">
-    <input type="text" id="addBin" placeholder="远端启动器路径（默认 ~/agentsearch/bin/agentsearch）" style="min-width:300px">
-    <button onclick="addRemote()">添加（rsync 安装并建索引）</button>
+<div class="main">
+  <div class="header">
+    <h1 id="pageTitle">仪表盘</h1>
+    <span class="spacer"></span>
+    <button class="iconbtn" onclick="pingAll(true)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M5 12.55a11 11 0 0 1 14 0"/><path d="M1.42 9a16 16 0 0 1 21.16 0"/><path d="M8.53 16.11a6 6 0 0 1 6.95 0"/><path d="M12 20h.01"/></svg>
+      测试连接</button>
+    <button class="iconbtn" onclick="refresh(true)">
+      <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 12a9 9 0 1 1-9-9c2.52 0 4.93 1 6.74 2.74L21 8"/><path d="M21 3v5h-5"/></svg>
+      刷新</button>
+    <button class="iconbtn" onclick="toggleTheme()" title="切换主题">
+      <svg id="themeIcon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/></svg>
+    </button>
   </div>
-</section>
 
-<section>
-  <h2>搜索诊断（按设备耗时拆分）</h2>
-  <div class="row">
-    <input type="text" id="q" placeholder="查询词，如：实验 重开" style="min-width:260px">
-    <input type="number" id="lim" value="20" min="1" max="50" style="width:70px" title="每设备取数">
-    <label class="muted"><input type="checkbox" id="allHosts" checked onchange="renderHostPickers()"> 全部设备</label>
-    <span id="hostPickers"></span>
-    <button onclick="runSearch()">查询</button>
-  </div>
-  <div id="chips" style="margin:10px 0"></div>
-  <div id="searchOut"></div>
-</section>
+  <!-- dashboard -->
+  <section class="view active" id="view-dashboard">
+    <div class="card">
+      <div class="banner">
+        <span class="dot" id="svcDot"></span>
+        <div><div class="k">本地服务</div><div class="v" id="svcState">运行中</div></div>
+        <div><div class="k">索引库</div><div class="v mono" id="svcDb" style="font-size:12px">—</div></div>
+        <div><div class="k">上次同步</div><div class="v" id="svcSync">—</div></div>
+        <span class="spacer" style="flex:1"></span>
+        <button onclick="syncLocal()">增量同步</button>
+      </div>
+    </div>
 
-<section>
-  <h2>操作日志</h2>
-  <div id="log"></div>
-</section>
-</main>
+    <div class="grid g4" id="statRow" style="margin-bottom:18px"></div>
+
+    <div class="card">
+      <h2>设备健康状态<span class="spacer"></span>
+        <button onclick="go('devices')">管理设备 →</button></h2>
+      <div class="grid g3" id="healthGrid"></div>
+    </div>
+  </section>
+
+  <!-- devices -->
+  <section class="view" id="view-devices">
+    <div class="card">
+      <h2>添加远程设备</h2>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+        <input type="text" id="addName" placeholder="名称，如 devbox-109" style="min-width:170px">
+        <input type="text" id="addHost" placeholder="SSH host（默认同名称）" style="min-width:170px">
+        <input type="text" id="addBin" placeholder="远端启动器路径（可选）" style="min-width:240px; flex:1">
+        <button class="primary" id="addBtn" onclick="addRemote()">rsync 安装并建索引</button>
+      </div>
+      <p class="muted" style="margin:10px 0 0; font-size:12px">要求：免密 SSH、远端 Python 3.7+ 且 SQLite 支持 FTS5。设备上的会话正文不会被复制到本机。</p>
+    </div>
+    <div class="card">
+      <h2>已注册设备<span class="spacer"></span>
+        <button onclick="pingAll(true)">全部测试</button>
+        <button onclick="syncAll()">全部同步</button>
+        <button onclick="updateAll()">全部更新代码</button></h2>
+      <div class="grid g3" id="devGrid"></div>
+    </div>
+  </section>
+
+  <!-- search -->
+  <section class="view" id="view-search">
+    <div class="card">
+      <h2>搜索诊断</h2>
+      <div style="display:flex; gap:10px; flex-wrap:wrap; align-items:center">
+        <input type="text" id="q" placeholder="查询词，如：实验 重开" style="min-width:260px; flex:1">
+        <input type="number" id="lim" value="20" min="1" max="50" style="width:74px" title="每设备取数">
+        <label class="chk"><input type="checkbox" id="allHosts" checked onchange="renderHostPickers()"> 全部设备</label>
+        <span id="hostPickers" style="display:flex;gap:12px"></span>
+        <button class="primary" onclick="runSearch()">查询</button>
+      </div>
+      <div id="chips" style="margin-top:14px"></div>
+    </div>
+    <div class="card">
+      <h2>合并结果（RRF）</h2>
+      <div id="searchOut"><div class="empty">输入查询词后，这里展示每台设备的耗时、命中数和合并排名。</div></div>
+    </div>
+  </section>
+
+  <!-- logs -->
+  <section class="view" id="view-logs">
+    <div class="card">
+      <h2>操作日志<span class="spacer"></span><button onclick="clearLogs()">清空</button></h2>
+      <div id="logbox"></div>
+    </div>
+  </section>
+</div>
+
+<div id="toasts"></div>
+<div id="modal"><div class="modal-box">
+  <h3 id="modalTitle"></h3><p id="modalBody"></p>
+  <div class="modal-acts"><button onclick="closeModal()">取消</button><button class="danger" id="modalOk">确认</button></div>
+</div></div>
 
 <script>
 const TOKEN = document.querySelector('meta[name=token]').content;
 let STATUS = null;
+const PING = {};   // name -> {ok, ms|error}
+const RSTAT = {};  // name -> remote status payload
 
-function log(msg, cls) {
-  const el = document.getElementById('log');
-  const line = document.createElement('div');
-  if (cls) line.className = cls;
-  line.textContent = new Date().toLocaleTimeString() + '  ' + msg;
-  el.appendChild(line); el.scrollTop = el.scrollHeight;
+/* ---------- theme & nav ---------- */
+function applyTheme(t) {
+  document.documentElement.dataset.theme = t;
+  try { localStorage.setItem('agentsearch-theme', t); } catch (e) {}
 }
+function toggleTheme() { applyTheme(document.documentElement.dataset.theme === 'dark' ? 'light' : 'dark'); }
+try { const t = localStorage.getItem('agentsearch-theme'); if (t) applyTheme(t); } catch (e) {}
+const TITLES = { dashboard:'仪表盘', devices:'设备管理', search:'搜索诊断', logs:'日志查看' };
+function go(view) {
+  document.querySelectorAll('.nav a').forEach(a => a.classList.toggle('active', a.dataset.view === view));
+  document.querySelectorAll('.view').forEach(v => v.classList.toggle('active', v.id === 'view-' + view));
+  document.getElementById('pageTitle').textContent = TITLES[view];
+  history.replaceState(null, '', '#' + view);
+}
+document.querySelectorAll('.nav a').forEach(a => a.onclick = () => go(a.dataset.view));
+if (location.hash === '#devices' || location.hash === '#search' || location.hash === '#logs') go(location.hash.slice(1));
+
+/* ---------- primitives ---------- */
+function esc(s) { return String(s ?? '').replace(/[&<>"]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;'}[c])); }
+function fmtTs(ts) { return ts ? new Date(ts * 1000).toLocaleString() : '从未同步'; }
+function totals(sources) { let f=0,m=0; for (const k in sources){ f+=sources[k].files; m+=sources[k].messages; }
+  return { files:f, msgs:m, text:f+' sessions · '+m.toLocaleString()+' messages' }; }
+function busy(btn, html) { if (!btn) return; btn.disabled = true; btn._html = btn.innerHTML; btn.innerHTML = html || '<span class="spin"></span> 执行中'; }
+function idle(btn) { if (!btn) return; btn.disabled = false; btn.innerHTML = btn._html || btn.innerHTML; }
 async function api(path, body) {
   const opt = body === undefined
-    ? { headers: { 'X-Dashboard-Token': TOKEN } }
-    : { method: 'POST', headers: { 'X-Dashboard-Token': TOKEN, 'Content-Type': 'application/json' },
-        body: JSON.stringify(body) };
-  const r = await fetch(path, opt);
-  return r.json();
-}
-function esc(s) { return String(s ?? '').replace(/[&<>]/g, c => ({'&':'&amp;','<':'&lt;','>':'&gt;'}[c])); }
-function fmtTs(ts) { return ts ? new Date(ts * 1000).toLocaleString() : '—'; }
-function totals(sources) {
-  let f = 0, m = 0;
-  for (const k in sources) { f += sources[k].files; m += sources[k].messages; }
-  return f + ' sessions / ' + m.toLocaleString() + ' messages';
+    ? { headers:{'X-Dashboard-Token':TOKEN} }
+    : { method:'POST', headers:{'X-Dashboard-Token':TOKEN,'Content-Type':'application/json'}, body:JSON.stringify(body) };
+  const r = await fetch(path, opt); return r.json();
 }
 
-async function refresh() {
+/* ---------- toasts & modal & logs ---------- */
+function toast(msg, type, sub) {
+  const el = document.createElement('div');
+  el.className = 'toast ' + (type || '');
+  el.innerHTML = '<div class="tmsg">' + esc(msg) + (sub ? '<small>' + esc(sub) + '</small>' : '') + '</div>';
+  document.getElementById('toasts').appendChild(el);
+  setTimeout(() => { el.style.transition = 'opacity .3s'; el.style.opacity = '0'; setTimeout(() => el.remove(), 300); }, 4200);
+  addLog(msg + (sub ? '  ' + sub : ''), type);
+}
+function addLog(msg, cls) {
+  const box = document.getElementById('logbox');
+  const line = document.createElement('div');
+  line.className = 'logline ' + (cls === 'err' ? 'err' : cls === 'ok' ? 'ok' : '');
+  line.innerHTML = '<span class="lt">' + new Date().toLocaleTimeString() + '</span>' + esc(msg);
+  box.appendChild(line); box.scrollTop = box.scrollHeight;
+}
+function clearLogs() { document.getElementById('logbox').innerHTML = ''; }
+function confirmDlg(title, body, onOk, danger) {
+  document.getElementById('modalTitle').textContent = title;
+  document.getElementById('modalBody').textContent = body;
+  const ok = document.getElementById('modalOk');
+  ok.className = danger === false ? 'primary' : 'danger';
+  ok.textContent = '确认';
+  ok.onclick = () => { closeModal(); onOk(); };
+  document.getElementById('modal').classList.add('show');
+}
+function closeModal() { document.getElementById('modal').classList.remove('show'); }
+document.getElementById('modal').addEventListener('click', e => { if (e.target.id === 'modal') closeModal(); });
+document.addEventListener('keydown', e => { if (e.key === 'Escape') closeModal(); });
+
+/* ---------- status ---------- */
+async function refresh(silent) {
   STATUS = await api('/api/status');
-  if (STATUS.error) { log(STATUS.error, 'log-err'); return; }
-  document.getElementById('hdr').textContent = STATUS.db;
-  const src = Object.entries(STATUS.sources)
-    .map(([k,v]) => k + ': ' + v.files + ' / ' + v.messages.toLocaleString()).join('　');
-  document.getElementById('localCard').innerHTML =
-    '<div class="name">local</div>' +
-    '<div class="kv">last sync: <b>' + fmtTs(STATUS.last_sync) + '</b></div>' +
-    '<div class="kv">' + esc(src) + '</div>' +
-    '<div class="row" style="margin-top:8px"><button onclick="syncLocal()">增量同步</button>' +
-    '<button onclick="remoteStatus(\'local\')">查看明细</button></div>';
-  renderCards(); renderHostPickers();
+  if (STATUS.error) { if (!silent) toast(STATUS.error, 'err'); return; }
+  document.getElementById('svcDb').textContent = STATUS.db;
+  document.getElementById('svcSync').textContent = fmtTs(STATUS.last_sync);
+  const t = totals(STATUS.sources);
+  const online = STATUS.remotes.filter(r => PING[r.name] && PING[r.name].ok).length;
+  document.getElementById('statRow').innerHTML = [
+    [iconDb(), '索引会话', t.files, '本机 ' + Object.keys(STATUS.sources).length + ' 个 agent'],
+    [iconMsg(), '索引消息', t.msgs.toLocaleString(), '跨三源统一索引'],
+    [iconDev(), '远程设备', STATUS.remotes.length, online + ' 台在线 / 共 ' + STATUS.remotes.length + ' 台'],
+    [iconClock(), '上次同步', STATUS.last_sync ? new Date(STATUS.last_sync*1000).toLocaleTimeString() : '—',
+       STATUS.last_sync ? new Date(STATUS.last_sync*1000).toLocaleDateString() : '请先同步'],
+  ].map(([ic,label,num,sub]) =>
+    '<div class="stat"><div class="top"><span class="ico">' + ic + '</span>' + label + '</div>' +
+    '<div class="num">' + num + '</div><div class="sub">' + esc(sub) + '</div></div>').join('');
+  renderHealth(); renderDevices(); renderHostPickers();
 }
-function renderCards() {
-  const box = document.getElementById('cards');
-  if (!STATUS.remotes.length) { box.innerHTML = '<span class="muted">尚未注册设备</span>'; return; }
-  box.innerHTML = STATUS.remotes.map(r =>
-    '<div class="card" id="card-' + esc(r.name) + '">' +
-    '<div class="name">' + esc(r.name) + '<span class="badge muted" id="badge-' + esc(r.name) + '">未测试</span></div>' +
-    '<div class="kv">host: <b>' + esc(r.host) + '</b></div>' +
-    '<div class="kv">bin: <b>' + esc(r.bin) + '</b></div>' +
-    '<div class="kv" id="stat-' + esc(r.name) + '"></div>' +
-    '<div class="row" style="margin-top:8px">' +
-    '<button onclick="pingOne(\'' + esc(r.name) + '\')">测试</button>' +
-    '<button onclick="remoteStatus(\'' + esc(r.name) + '\')">索引状态</button>' +
-    '<button onclick="syncOne(\'' + esc(r.name) + '\')">同步</button>' +
-    '<button onclick="updateOne(\'' + esc(r.name) + '\')">更新代码</button>' +
-    '<button class="danger" onclick="removeOne(\'' + esc(r.name) + '\')">移除</button>' +
-    '</div></div>').join('');
+function healthIcon(state) {
+  if (state === 'ok') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><path d="M20 6 9 17l-5-5"/></svg>';
+  if (state === 'bad') return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round"><path d="M18 6 6 18M6 6l12 12"/></svg>';
+  return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round"><path d="M12 8h.01M12 12v4"/></svg>';
 }
-function renderHostPickers() {
-  const all = document.getElementById('allHosts').checked;
-  const names = ['local'].concat(STATUS.remotes.map(r => r.name));
-  document.getElementById('hostPickers').innerHTML = all ? '' :
-    names.map(n => '<label class="muted"><input type="checkbox" class="hpick" value="' + esc(n) + '" checked> ' + esc(n) + '</label>').join(' ');
+function srcLine(sources) {
+  return Object.entries(sources).map(([k,v]) =>
+    '<span class="pill idle" style="margin:1px 4px 1px 0">' + esc(k) + ' ' + v.files + '/' + v.messages.toLocaleString() + '</span>').join('');
 }
-function setBadge(name, state, text) {
-  const b = document.getElementById('badge-' + name);
-  b.className = 'badge ' + state; b.textContent = text;
+function renderHealth() {
+  const cards = ['<div class="dev"><div class="head"><span class="name">local（本机）</span>' +
+    '<span class="health ok" style="margin-left:auto">' + healthIcon('ok') + '</span></div>' +
+    '<div class="meta"><div>' + srcLine(STATUS.sources) + '</div><div>last sync: <b>' + fmtTs(STATUS.last_sync) + '</b></div></div>' +
+    '<div class="acts"><button onclick="syncLocal()">同步</button></div></div>'];
+  cards.push(...STATUS.remotes.map(r => {
+    const p = PING[r.name]; const s = RSTAT[r.name];
+    const state = !p ? 'unknown' : p.ok ? 'ok' : 'bad';
+    return '<div class="dev"><div class="head"><span class="name">' + esc(r.name) + '</span>' +
+      '<span class="health ' + state + '">' + healthIcon(state) + '</span></div>' +
+      '<div class="meta"><div>' + esc(r.host) + (p ? (p.ok ? ' · <b style="color:var(--ok)">' + p.ms + ' ms</b>' : ' · <b style="color:var(--err)">不可达</b>') : ' · 未测试') + '</div>' +
+      (s ? '<div>' + srcLine(s.sources) + '</div><div>last sync: <b>' + fmtTs(s.last_sync) + '</b></div>' : '') + '</div>' +
+      '<div class="acts"><button onclick="pingOne(\'' + esc(r.name) + '\')">测试</button>' +
+      '<button onclick="remoteStatus(\'' + esc(r.name) + '\')">索引状态</button>' +
+      '<button onclick="syncOne(\'' + esc(r.name) + '\')">同步</button></div></div>';
+  }));
+  document.getElementById('healthGrid').innerHTML = cards.join('');
+  if (!STATUS.remotes.length) document.getElementById('healthGrid').innerHTML +=
+    '<div class="empty" style="grid-column:1/-1">还没有远程设备，到「设备管理」添加。</div>';
 }
 
-async function pingAll() {
-  log('测试全部连接…');
-  const r = await api('/api/ping', {});
-  for (const x of r.results) {
-    if (!document.getElementById('badge-' + x.name)) continue;
-    if (x.ok) { setBadge(x.name, 'ok', x.ms + ' ms'); log(x.name + ': ' + x.ms + ' ms', 'log-ok'); }
-    else { setBadge(x.name, 'bad', '不可达'); log(x.name + ': ' + x.error, 'log-err'); }
-  }
-}
-async function pingOne(name) {
-  const r = (await api('/api/ping', { name })).results[0];
-  if (r.ok) { setBadge(name, 'ok', r.ms + ' ms'); log(name + ': ' + r.ms + ' ms', 'log-ok'); }
-  else { setBadge(name, 'bad', '不可达'); log(name + ': ' + r.error, 'log-err'); }
-}
-async function remoteStatus(name) {
-  if (name === 'local') { log('local: ' + totals(STATUS.sources) + '，last sync ' + fmtTs(STATUS.last_sync)); return; }
-  const el = document.getElementById('stat-' + name);
-  if (el) el.textContent = '查询中…';
-  const r = await api('/api/remote-status?name=' + encodeURIComponent(name));
-  if (!r.ok) { if (el) el.textContent = ''; log(name + ' 状态失败: ' + r.error, 'log-err'); return; }
-  const s = r.status;
-  if (el) el.innerHTML = 'last sync: <b>' + fmtTs(s.last_sync) + '</b>　(' + r.ms + ' ms)<br>' + esc(totals(s.sources));
-  log(name + ' 索引: ' + totals(s.sources), 'log-ok');
-}
-async function syncLocal() {
-  log('local 增量同步…');
-  const r = await api('/api/sync', {});
-  if (r.ok) { log('local: +' + r.stats.files_new + ' 新 / ' + r.stats.messages + ' 消息 (' + r.ms + ' ms)', 'log-ok'); refresh(); }
-  else log(r.error, 'log-err');
-}
-async function syncOne(name) {
-  log(name + ' 增量同步…');
-  const r = await api('/api/sync', { name });
-  if (r.ok) { log(name + ': ' + r.output + ' (' + r.ms + ' ms)', 'log-ok'); remoteStatus(name); }
-  else log(r.error, 'log-err');
-}
-function syncAll() { syncLocal(); STATUS.remotes.forEach(r => syncOne(r.name)); }
-async function updateOne(name) {
-  if (!confirm('重新 rsync 代码到 ' + name + ' 并增量建索引？')) return;
-  log(name + ' 更新代码…');
-  const r = await api('/api/remotes/update', { name });
-  if (r.ok) { r.logs.forEach(l => log(l)); log(name + ' 更新完成', 'log-ok'); }
-  else log(r.error, 'log-err');
-}
-async function removeOne(name) {
-  if (!confirm('移除设备 ' + name + '？不会删除设备上的文件。')) return;
-  const r = await api('/api/remotes/remove', { name });
-  if (r.ok) { log('已移除 ' + name, 'log-ok'); refresh(); } else log(r.error, 'log-err');
+/* ---------- devices page ---------- */
+function renderDevices() {
+  if (!STATUS) return;
+  const box = document.getElementById('devGrid');
+  if (!STATUS.remotes.length) { box.innerHTML = '<div class="empty" style="grid-column:1/-1">尚未注册设备</div>'; return; }
+  box.innerHTML = STATUS.remotes.map(r => {
+    const p = PING[r.name]; const s = RSTAT[r.name];
+    const state = !p ? 'unknown' : p.ok ? 'ok' : 'bad';
+    return '<div class="dev"><div class="head"><span class="name">' + esc(r.name) + '</span>' +
+      '<span class="health ' + state + '">' + healthIcon(state) + '</span></div>' +
+      '<div class="meta"><div>host: <b>' + esc(r.host) + '</b>' +
+      (p ? (p.ok ? ' · ' + p.ms + ' ms' : ' · <b style="color:var(--err)">不可达</b>') : '') + '</div>' +
+      '<div>bin: <b>' + esc(r.bin) + '</b></div>' +
+      (s ? '<div>' + srcLine(s.sources) + '</div><div>last sync: <b>' + fmtTs(s.last_sync) + '</b> (' + s.ms + ' ms)</div>' : '') +
+      '</div><div class="acts">' +
+      '<button onclick="pingOne(\'' + esc(r.name) + '\')">测试</button>' +
+      '<button onclick="remoteStatus(\'' + esc(r.name) + '\')">索引状态</button>' +
+      '<button onclick="syncOne(\'' + esc(r.name) + '\')">同步</button>' +
+      '<button onclick="updateOne(\'' + esc(r.name) + '\')">更新代码</button>' +
+      '<button class="danger" onclick="removeOne(\'' + esc(r.name) + '\')">移除</button>' +
+      '</div></div>';
+  }).join('');
 }
 async function addRemote() {
   const name = document.getElementById('addName').value.trim();
   const host = document.getElementById('addHost').value.trim() || name;
   const bin = document.getElementById('addBin').value.trim();
-  if (!name) { log('需要填写名称', 'log-err'); return; }
-  log('添加 ' + name + '（安装+建索引可能耗时几十秒）…');
+  if (!name) { toast('需要填写设备名称', 'err'); return; }
+  const btn = document.getElementById('addBtn'); busy(btn, '<span class="spin"></span> 安装中');
+  toast('正在连接 ' + host + ' 并安装，通常需要几十秒…');
   const r = await api('/api/remotes/add', { name, host, bin });
-  if (r.ok) { r.logs.forEach(l => log(name + ': ' + l)); log('已添加 ' + name, 'log-ok'); refresh(); }
-  else log(r.error, 'log-err');
+  idle(btn);
+  if (r.ok) {
+    toast('已添加设备 ' + name, 'ok', (r.logs || []).join(' / '));
+    document.getElementById('addName').value = ''; document.getElementById('addHost').value = ''; document.getElementById('addBin').value = '';
+    await refresh(true); pingOne(name);
+  } else toast('添加失败：' + r.error, 'err');
+}
+function removeOne(name) {
+  confirmDlg('移除设备 ' + name, '只删除本机的连接配置，不会删除设备上的任何文件。', async () => {
+    const r = await api('/api/remotes/remove', { name });
+    if (r.ok) { toast('已移除 ' + name, 'ok'); delete PING[name]; delete RSTAT[name]; refresh(true); }
+    else toast(r.error, 'err');
+  });
+}
+function updateOne(name) {
+  confirmDlg('更新 ' + name + ' 的代码', '将重新 rsync 代码并在该设备上增量建索引。', () => doUpdate({ name }, name), false);
+}
+function updateAll() {
+  if (!STATUS.remotes.length) { toast('没有已注册设备', 'err'); return; }
+  confirmDlg('更新全部设备', '将向 ' + STATUS.remotes.length + ' 台设备重新 rsync 代码并增量建索引。', () => doUpdate({}, '全部设备'), false);
+}
+async function doUpdate(body, label) {
+  toast('开始更新 ' + label + '…');
+  const r = await api('/api/remotes/update', body);
+  if (r.ok) toast('更新完成：' + label, 'ok', (r.logs || []).join(' / '));
+  else toast('更新失败：' + r.error, 'err');
+}
+
+/* ---------- actions ---------- */
+async function pingAll(silent) {
+  const r = await api('/api/ping', {});
+  for (const x of r.results) {
+    PING[x.name] = x;
+    if (x.ok) { if (!silent) toast(x.name + ' 连接正常', 'ok', x.ms + ' ms'); }
+    else if (!silent) toast(x.name + ' 不可达', 'err', x.error);
+  }
+  addLog('连接测试：' + r.results.map(x => x.name + (x.ok ? ' ✓' : ' ✗')).join('，'),
+         r.results.every(x => x.ok) ? 'ok' : 'err');
+  renderHealth(); renderDevices();
+}
+async function pingOne(name) {
+  const r = (await api('/api/ping', { name })).results[0];
+  PING[name] = r;
+  if (r.ok) toast(name + ' 连接正常', 'ok', r.ms + ' ms'); else toast(name + ' 不可达', 'err', r.error);
+  renderHealth(); renderDevices();
+}
+async function remoteStatus(name) {
+  const r = await api('/api/remote-status?name=' + encodeURIComponent(name));
+  if (r.ok) { RSTAT[name] = r.status; toast(name + ' 索引状态', 'ok', totals(r.status.sources).text); }
+  else { toast(name + ' 状态获取失败', 'err', r.error); PING[name] = { ok:false, error:r.error }; }
+  renderHealth(); renderDevices();
+}
+async function syncLocal() {
+  toast('本机增量同步中…');
+  const t0 = Date.now();
+  const r = await api('/api/sync', {});
+  if (r.ok) { toast('本机同步完成', 'ok', '+' + r.stats.files_new + ' 新 / ' + r.stats.messages + ' 消息 / ' + r.ms + ' ms'); refresh(true); }
+  else toast(r.error, 'err');
+}
+async function syncOne(name) {
+  toast(name + ' 增量同步中…');
+  const r = await api('/api/sync', { name });
+  if (r.ok) { toast(name + ' 同步完成', 'ok', r.output + ' / ' + r.ms + ' ms'); remoteStatus(name); }
+  else toast(name + ' 同步失败', 'err', r.error);
+}
+function syncAll() {
+  if (!STATUS.remotes.length) { syncLocal(); return; }
+  syncLocal(); STATUS.remotes.forEach(r => syncOne(r.name));
+}
+
+/* ---------- search diagnose ---------- */
+function renderHostPickers() {
+  if (!STATUS) return;
+  const all = document.getElementById('allHosts').checked;
+  const names = ['local'].concat(STATUS.remotes.map(r => r.name));
+  document.getElementById('hostPickers').innerHTML = all ? '' :
+    names.map(n => '<label class="chk"><input type="checkbox" class="hpick" value="' + esc(n) + '" checked> ' + esc(n) + '</label>').join('');
 }
 function pickedHosts() {
   if (document.getElementById('allHosts').checked) return null;
@@ -454,22 +753,35 @@ async function runSearch() {
   const query = document.getElementById('q').value.trim();
   if (!query) return;
   const limit = parseInt(document.getElementById('lim').value, 10) || 20;
+  const btn = event.target; busy(btn);
   const r = await api('/api/search', { query, limit, hosts: pickedHosts() });
-  if (r.error) { log(r.error, 'log-err'); return; }
-  document.getElementById('chips').innerHTML = r.per_host.map(h => h.ok
-    ? '<span class="hostchip ok">' + esc(h.host) + ' · ' + h.ms + ' ms · ' + h.hits + ' 命中</span>'
-    : '<span class="hostchip bad">' + esc(h.host) + ' · 不可达</span>').join('')
-    + (r.warnings.length ? '<div class="muted" style="margin-top:4px">' + r.warnings.map(esc).join('<br>') + '</div>' : '');
+  idle(btn);
+  if (r.error) { toast(r.error, 'err'); return; }
+  document.getElementById('chips').innerHTML = r.per_host.map(h =>
+    '<span class="pill ' + (h.ok ? 'ok' : 'bad') + '" style="margin:2px 6px 2px 0">' +
+    esc(h.host) + ' · ' + (h.ok ? h.ms + ' ms · ' + h.hits + ' 命中' : '不可达') + '</span>').join('') +
+    (r.warnings.length ? '<div class="muted" style="margin-top:6px; font-size:12px">' + r.warnings.map(esc).join('<br>') + '</div>' : '');
+  if (!r.merged.length) { document.getElementById('searchOut').innerHTML = '<div class="empty">没有匹配结果。</div>'; return; }
   document.getElementById('searchOut').innerHTML =
-    '<table><tr><th>#</th><th>设备</th><th>来源</th><th>时间</th><th>摘要</th><th>位置</th></tr>' +
-    r.merged.map((h, i) => '<tr><td>' + (i + 1) + '</td><td><code>' + esc(h.host) + '</code></td>' +
-      '<td>' + esc(h.source) + '</td><td>' + esc((h.ts || '').slice(0, 16).replace('T', ' ')) + '</td>' +
-      '<td class="snip">' + esc((h.snippet || '').replace(/\[\[|\]\]/g, '')) + '</td>' +
-      '<td class="muted"><code>' + esc(h.path.split('/').pop()) + ':' + h.lineno + '</code></td></tr>').join('')
-    + '</table>';
-  log('搜索完成: ' + r.merged.length + ' 条合并结果');
+    '<div style="overflow:auto"><table><thead><tr><th>#</th><th>设备</th><th>来源</th><th>时间</th><th>摘要</th><th>位置</th></tr></thead><tbody>' +
+    r.merged.map((h, i) => '<tr><td class="muted">' + (i+1) + '</td>' +
+      '<td><span class="hosttag ' + (h.host === 'local' ? 'local' : '') + '">' + esc(h.host) + '</span></td>' +
+      '<td>' + esc(h.source) + '</td><td class="muted nowrap">' + esc((h.ts||'').slice(0,16).replace('T',' ')) + '</td>' +
+      '<td class="snip">' + esc((h.snippet||'').replace(/\[\[|\]\]/g,'')) + '</td>' +
+      '<td class="path mono">' + esc(h.path.split('/').pop()) + ':' + h.lineno + '</td></tr>').join('') +
+    '</tbody></table></div>';
+  addLog('搜索「' + query + '」：' + r.per_host.map(h => h.host + ' ' + (h.ok ? h.ms + 'ms' : '✗')).join('，'));
 }
-refresh();
+document.getElementById('q').addEventListener('keydown', e => { if (e.key === 'Enter') runSearchVia(e.target); });
+function runSearchVia() { runSearch(); }
+
+/* ---------- icons ---------- */
+function iconDb() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><ellipse cx="12" cy="5" rx="8" ry="3"/><path d="M4 5v6c0 1.7 3.6 3 8 3s8-1.3 8-3V5M4 11v6c0 1.7 3.6 3 8 3s8-1.3 8-3v-6"/></svg>'; }
+function iconMsg() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg>'; }
+function iconDev() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><rect x="2" y="4" width="20" height="7" rx="2"/><rect x="2" y="13" width="20" height="7" rx="2"/><path d="M6 7.5h.01M6 16.5h.01"/></svg>'; }
+function iconClock() { return '<svg viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round"><circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/></svg>'; }
+
+refresh(true);
 </script>
 </body></html>
 """
